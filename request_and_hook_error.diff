@@ -1,0 +1,384 @@
+diff --git a/taskhawk/amazon_web_services.go b/taskhawk/amazon_web_services.go
+index 1b10448..995705b 100644
+--- a/taskhawk/amazon_web_services.go
++++ b/taskhawk/amazon_web_services.go
+@@ -166,12 +166,12 @@ func (a *amazonWebServices) messageHandler(ctx context.Context, messageBody stri
+ 	return message.callTask(ctx, receipt)
+ }
+ 
+-func (a *amazonWebServices) messageHandlerSQS(ctx context.Context, message *sqs.Message) error {
+-	return a.messageHandler(ctx, *message.Body, *message.ReceiptHandle)
++func (a *amazonWebServices) messageHandlerSQS(request *QueueRequest) error {
++	return a.messageHandler(request.Ctx, *request.QueueMessage.Body, *request.QueueMessage.ReceiptHandle)
+ }
+ 
+-func (a *amazonWebServices) messageHandlerLambda(ctx context.Context, record *events.SNSEventRecord) error {
+-	return a.messageHandler(ctx, record.SNS.Message, "")
++func (a *amazonWebServices) messageHandlerLambda(request *LambdaRequest) error {
++	return a.messageHandler(request.Ctx, request.Record.SNS.Message, "")
+ }
+ 
+ // waitGroupError is like sync.WaitGroup but provides one extra field for storing error
+@@ -187,10 +187,15 @@ func (w *waitGroupError) DoneWithError(err error) {
+ 	w.Done()
+ }
+ 
+-func (a *amazonWebServices) processRecord(wge *waitGroupError, ctx context.Context, record *events.SNSEventRecord) {
++func (a *amazonWebServices) processRecord(wge *waitGroupError, request *LambdaRequest) {
+ 
+-	getPreProcessHookLambdaApp(ctx)(record)
+-	err := a.messageHandlerLambda(ctx, record)
++	err := getPreProcessHookLambdaApp(request.Ctx)(request)
++	if err != nil {
++		logrus.Errorf("Pre-process hook failed with error: %v", err)
++		wge.DoneWithError(err)
++		return
++	}
++	err = a.messageHandlerLambda(request)
+ 	if err == nil {
+ 		wge.Done()
+ 		return
+@@ -202,12 +207,16 @@ func (a *amazonWebServices) processRecord(wge *waitGroupError, ctx context.Conte
+ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent events.SNSEvent) error {
+ 	wge := waitGroupError{}
+ 	for i := range snsEvent.Records {
++		request := &LambdaRequest{
++			Ctx:    ctx,
++			Record: &snsEvent.Records[i],
++		}
+ 		select {
+ 		case <-ctx.Done():
+ 			break
+ 		default:
+ 			wge.Add(1)
+-			go a.processRecord(&wge, ctx, &snsEvent.Records[i])
++			go a.processRecord(&wge, request)
+ 		}
+ 	}
+ 	wge.Wait()
+@@ -218,16 +227,19 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent even
+ 	return wge.Error
+ }
+ 
+-func (a *amazonWebServices) processMessage(wg *sync.WaitGroup, ctx context.Context, queueMessage *sqs.Message,
+-	queueUrl *string, queueName string) {
++func (a *amazonWebServices) processMessage(wg *sync.WaitGroup, request *QueueRequest) {
+ 	defer wg.Done()
+-	getPreProcessHookQueueApp(ctx)(&queueName, queueMessage)
+-	err := a.messageHandlerSQS(ctx, queueMessage)
++	err := getPreProcessHookQueueApp(request.Ctx)(request)
++	if err != nil {
++		logrus.Errorf("Pre-process hook failed with error: %v", err)
++		return
++	}
++	err = a.messageHandlerSQS(request)
+ 	switch err {
+ 	case nil:
+-		_, err := a.sqs.DeleteMessageWithContext(ctx, &sqs.DeleteMessageInput{
+-			QueueUrl:      queueUrl,
+-			ReceiptHandle: queueMessage.ReceiptHandle,
++		_, err := a.sqs.DeleteMessageWithContext(request.Ctx, &sqs.DeleteMessageInput{
++			QueueUrl:      &request.QueueURL,
++			ReceiptHandle: request.QueueMessage.ReceiptHandle,
+ 		})
+ 		if err != nil {
+ 			logrus.Errorf("Failed to delete message with error: %v", err)
+@@ -260,12 +272,18 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
+ 	out, err := a.sqs.ReceiveMessageWithContext(ctx, input)
+ 	wg := sync.WaitGroup{}
+ 	for _, queueMessage := range out.Messages {
++		request := &QueueRequest{
++			Ctx:          ctx,
++			QueueMessage: queueMessage,
++			QueueURL:     *queueUrl,
++			QueueName:    queueName,
++		}
+ 		select {
+ 		case <-ctx.Done():
+ 			break
+ 		default:
+ 			wg.Add(1)
+-			go a.processMessage(&wg, ctx, queueMessage, queueUrl, queueName)
++			go a.processMessage(&wg, request)
+ 		}
+ 	}
+ 	wg.Wait()
+diff --git a/taskhawk/amazon_web_services_test.go b/taskhawk/amazon_web_services_test.go
+index be87ef2..46e5772 100644
+--- a/taskhawk/amazon_web_services_test.go
++++ b/taskhawk/amazon_web_services_test.go
+@@ -409,12 +409,14 @@ type preProcessHook struct {
+ 	mock.Mock
+ }
+ 
+-func (p *preProcessHook) PreProcessHookQueueApp(queueName *string, queueMessage *sqs.Message) {
+-	p.Called(queueName, queueMessage)
++func (p *preProcessHook) PreProcessHookQueueApp(request *QueueRequest) error {
++	args := p.Called(request)
++	return args.Error(0)
+ }
+ 
+-func (p *preProcessHook) PreProcessHookLambdaApp(record *events.SNSEventRecord) {
+-	p.Called(record)
++func (p *preProcessHook) PreProcessHookLambdaApp(request *LambdaRequest) error {
++	args := p.Called(request)
++	return args.Error(0)
+ }
+ 
+ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
+@@ -471,7 +473,13 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
+ 		fakeSqs.On("DeleteMessageWithContext", ctx, expectedDeleteMessageInput).Return(
+ 			&sqs.DeleteMessageOutput{}, nil)
+ 
+-		preProcessHook.On("PreProcessHookQueueApp", &queueName, outMessages[i]).Return(nil)
++		queueRequest := &QueueRequest{
++			Ctx:          ctx,
++			QueueURL:     queueUrl,
++			QueueName:    queueName,
++			QueueMessage: outMessages[i],
++		}
++		preProcessHook.On("PreProcessHookQueueApp", queueRequest).Return(nil)
+ 	}
+ 
+ 	receiveMessageOutput := &sqs.ReceiveMessageOutput{
+@@ -496,6 +504,89 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
+ 	preProcessHook.AssertExpectations(t)
+ }
+ 
++func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
++	preProcessHook := &preProcessHook{}
++
++	settings := &Settings{
++		AWSRegion:    "us-east-1",
++		AWSAccountID: "1234567890",
++		AWSAccessKey: "fake_access_1",
++		AWSSecretKey: "fake_secret_2",
++		Queue:        "dev-myapp",
++		PreProcessHookQueueApp: preProcessHook.PreProcessHookQueueApp,
++	}
++	ctx := withSettings(context.Background(), settings)
++
++	task := NewSendEmailTask()
++	require.NoError(t, RegisterTask(task))
++	defer CleanupTaskRegistry()
++
++	fakeSqs := &FakeSQS{}
++	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
++	queueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
++	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
++		QueueUrl:            &queueUrl,
++		MaxNumberOfMessages: aws.Int64(10),
++		VisibilityTimeout:   aws.Int64(10),
++		WaitTimeSeconds:     aws.Int64(sqsWaitTimeoutSeconds),
++	}
++
++	outMessages := make([]*sqs.Message, 2)
++	for i := 0; i < 2; i++ {
++		input := &SendEmailTaskInput{
++			To:      fmt.Sprintf("mail%d@example.com", i),
++			From:    "mail@spammer.com",
++			Subject: "Hi there!",
++		}
++
++		message := getValidMessage(input)
++		msgJSON, err := json.Marshal(message)
++		require.NoError(t, err)
++
++		outMessages[i] = &sqs.Message{
++			Body:          aws.String(string(msgJSON)),
++			ReceiptHandle: aws.String(uuid.Must(uuid.NewV4()).String()),
++		}
++
++		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
++			QueueUrl:      &queueUrl,
++			ReceiptHandle: outMessages[i].ReceiptHandle,
++		}
++		fakeSqs.On("DeleteMessageWithContext", ctx, expectedDeleteMessageInput).Return(
++			&sqs.DeleteMessageOutput{}, nil)
++
++		queueRequest := &QueueRequest{
++			Ctx:          ctx,
++			QueueURL:     queueUrl,
++			QueueName:    queueName,
++			QueueMessage: outMessages[i],
++		}
++		preProcessHook.On("PreProcessHookQueueApp", queueRequest).Return(errors.New("oops"))
++	}
++
++	receiveMessageOutput := &sqs.ReceiveMessageOutput{
++		Messages: outMessages,
++	}
++	fakeSqs.On("ReceiveMessageWithContext", ctx, expectedReceiveMessageInput).Return(
++		receiveMessageOutput, nil)
++
++	awsClient := &amazonWebServices{
++		sqs: fakeSqs,
++		// pre-filled cache
++		queueUrls: map[Priority]*string{
++			PriorityHigh: &queueUrl,
++		},
++	}
++	err := awsClient.FetchAndProcessMessages(
++		ctx, PriorityHigh, 10, 10,
++	)
++	// the error is NOT bubbled up
++	assert.NoError(t, err)
++	task.AssertExpectations(t)
++
++	preProcessHook.AssertExpectations(t)
++}
++
+ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
+ 	preProcessHook := &preProcessHook{}
+ 
+@@ -540,7 +631,12 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
+ 			},
+ 		}
+ 
+-		preProcessHook.On("PreProcessHookLambdaApp", &snsRecords[i]).Return(nil)
++		lambdaRequest := &LambdaRequest{
++			Ctx:    ctx,
++			Record: &snsRecords[i],
++		}
++
++		preProcessHook.On("PreProcessHookLambdaApp", lambdaRequest).Return(nil)
+ 	}
+ 	snsEvent := events.SNSEvent{
+ 		Records: snsRecords,
+@@ -554,6 +650,66 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
+ 	preProcessHook.AssertExpectations(t)
+ }
+ 
++func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
++	preProcessHook := &preProcessHook{}
++
++	awsClient := &amazonWebServices{}
++
++	settings := &Settings{
++		AWSRegion:    "us-east-1",
++		AWSAccountID: "1234567890",
++		AWSAccessKey: "fake_access_1",
++		AWSSecretKey: "fake_secret_2",
++		Queue:        "dev-myapp",
++		IsLambdaApp:  true,
++
++		PreProcessHookLambdaApp: preProcessHook.PreProcessHookLambdaApp,
++	}
++	ctx := withSettings(context.Background(), settings)
++
++	task := NewSendEmailTask()
++	require.NoError(t, RegisterTask(task))
++	defer CleanupTaskRegistry()
++
++	snsRecords := make([]events.SNSEventRecord, 2)
++
++	for i := 0; i < 2; i++ {
++		input := &SendEmailTaskInput{
++			To:      fmt.Sprintf("mail%d@example.com", i),
++			From:    "mail@spammer.com",
++			Subject: "Hi there!",
++		}
++
++		message := getValidMessage(input)
++		msgJSON, err := json.Marshal(message)
++		require.NoError(t, err)
++
++		snsRecords[i] = events.SNSEventRecord{
++			SNS: events.SNSEntity{
++				MessageID: uuid.Must(uuid.NewV4()).String(),
++				Message:   string(msgJSON),
++			},
++		}
++
++		lambdaRequest := &LambdaRequest{
++			Ctx:    ctx,
++			Record: &snsRecords[i],
++		}
++
++		preProcessHook.On("PreProcessHookLambdaApp", lambdaRequest).Return(errors.New("oops"))
++	}
++	snsEvent := events.SNSEvent{
++		Records: snsRecords,
++	}
++
++	err := awsClient.HandleLambdaEvent(ctx, snsEvent)
++	assert.EqualError(t, err, "oops")
++
++	task.AssertExpectations(t)
++
++	preProcessHook.AssertExpectations(t)
++}
++
+ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
+ 	awsClient := &amazonWebServices{}
+ 
+diff --git a/taskhawk/models.go b/taskhawk/models.go
+index ca61320..afaf1e4 100644
+--- a/taskhawk/models.go
++++ b/taskhawk/models.go
+@@ -14,6 +14,9 @@ import (
+ 	"fmt"
+ 	"strconv"
+ 	"time"
++
++	"github.com/aws/aws-lambda-go/events"
++	"github.com/aws/aws-sdk-go/service/sqs"
+ )
+ 
+ // JSONTime is just a wrapper around time that serializes time to epoch in milliseconds
+@@ -234,3 +237,19 @@ func (p *Priority) UnmarshalJSON(b []byte) error {
+ 	}
+ 	return nil
+ }
++
++// QueueRequest represents a request for queue apps
++type QueueRequest struct {
++	Ctx          context.Context
++	Priority     Priority
++	QueueMessage *sqs.Message
++	QueueName    string
++	QueueURL     string
++}
++
++// LambdaRequest represents a request for lambda apps
++type LambdaRequest struct {
++	Ctx      context.Context
++	Priority Priority
++	Record   *events.SNSEventRecord
++}
+diff --git a/taskhawk/settings.go b/taskhawk/settings.go
+index caa0202..0e55df8 100644
+--- a/taskhawk/settings.go
++++ b/taskhawk/settings.go
+@@ -10,13 +10,10 @@ package taskhawk
+ import (
+ 	"context"
+ 	"fmt"
+-
+-	"github.com/aws/aws-lambda-go/events"
+-	"github.com/aws/aws-sdk-go/service/sqs"
+ )
+ 
+-type PreProcessHookQueueApp func(queueName *string, queueMessage *sqs.Message)
+-type PreProcessHookLambdaApp func(record *events.SNSEventRecord)
++type PreProcessHookQueueApp func(request *QueueRequest) error
++type PreProcessHookLambdaApp func(request *LambdaRequest) error
+ type DefaultHeaders func(task ITask) map[string]string
+ 
+ // Settings is used to create Taskhawk settings
+@@ -41,9 +38,13 @@ type Settings struct {
+ 	Sync bool
+ }
+ 
+-func noOpPreProcessHookQueueApp(_ *string, _ *sqs.Message) {}
++func noOpPreProcessHookQueueApp(_ *QueueRequest) error {
++	return nil
++}
+ 
+-func noOpPreProcessHookLambdaApp(_ *events.SNSEventRecord) {}
++func noOpPreProcessHookLambdaApp(_ *LambdaRequest) error {
++	return nil
++}
+ 
+ func emptyDefaultHeaders(task ITask) map[string]string {
+ 	return map[string]string{}

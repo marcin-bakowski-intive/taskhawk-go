@@ -1,0 +1,36 @@
+# Logs
+*.log
+
+# Unit test / coverage reports
+.coverage
+.tox
+
+# Translations
+*.mo
+*.pot
+
+# Pycharm
+.idea
+*.iml
+
+# Vim
+
+*~
+*.swp
+*.swo
+
+# test files
+*.pem
+
+# emacs
+.dir-locals.el
+
+# godeps
+vendor/*
+!vendor/vendor.json
+
+# binary
+bin
+
+# deps
+deps
