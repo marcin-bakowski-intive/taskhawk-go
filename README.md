@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/Automatic/taskhawk-go.svg?branch=master)](https://travis-ci.org/Automatic/taskhawk-go)
 [![Go Report Card](https://goreportcard.com/badge/Automatic/taskhawk-go)](https://goreportcard.com/report/Automatic/taskhawk-go)
-[![Godoc](https://godoc.org/github.com/Automatic/taskhawk-go?status.svg)](http://godoc.org/github.com/Automatic/taskhawk-go)
+[![Godoc](https://godoc.org/github.com/Automatic/taskhawk-go/taskhawk?status.svg)](http://godoc.org/github.com/Automatic/taskhawk-go/taskhawk)
 
 TaskHawk is a replacement for celery that works on AWS SQS/SNS, while
 keeping things pretty simple and straight forward. Any unbound function
