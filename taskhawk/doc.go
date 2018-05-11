@@ -6,7 +6,7 @@
  */
 
 /*
-TaskHawk is a replacement for celery that works on AWS SQS/SNS, while keeping things pretty simple and
+Package taskhawk is a replacement for celery that works on AWS SQS/SNS, while keeping things pretty simple and
 straightforward. Any unbound function can be converted into a TaskHawk task.
 
 For inter-service messaging, see Hedwig: https://godoc.org/github.com/Automatic/hedwig-go/hedwig.

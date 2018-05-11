@@ -63,8 +63,8 @@ type ILambdaConsumer interface {
 
 const sqsWaitTimeoutSeconds int64 = 20
 
-// RetryException indicates that task failed for a known reason and should be retried without logging falure
-var RetryException = errors.New("Retry exception")
+// ErrRetry indicates that task failed for a known reason and should be retried without logging falure
+var ErrRetry = errors.New("Retry exception")
 
 type lambdaConsumer struct {
 	awsClient iamazonWebServices
@@ -117,7 +117,7 @@ func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRe
 // Cancelable context may be used to cancel processing of messages
 func NewQueueConsumer(sessionCache *AWSSessionsCache, settings *Settings) IQueueConsumer {
 	return &queueConsumer{
-		awsClient: newAmazonWebServices(sessionCache, withSettings(context.Background(), settings)),
+		awsClient: newAmazonWebServices(withSettings(context.Background(), settings), sessionCache),
 		settings:  settings,
 	}
 }
@@ -127,7 +127,7 @@ func NewQueueConsumer(sessionCache *AWSSessionsCache, settings *Settings) IQueue
 // Cancelable context may be used to cancel processing of messages
 func NewLambdaConsumer(sessionCache *AWSSessionsCache, settings *Settings) ILambdaConsumer {
 	return &lambdaConsumer{
-		awsClient: newAmazonWebServices(sessionCache, withSettings(context.Background(), settings)),
+		awsClient: newAmazonWebServices(withSettings(context.Background(), settings), sessionCache),
 		settings:  settings,
 	}
 }

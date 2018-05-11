@@ -68,6 +68,7 @@ type message struct {
 	Task     *taskDef    `json:"task"`
 }
 
+// Version represents the message format version
 type Version string
 
 const (

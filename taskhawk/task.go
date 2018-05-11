@@ -73,7 +73,7 @@ func (t *Task) Priority() Priority {
 	return t.DefaultPriority
 }
 
-// Dispatch a task asynchronously with custom priority.
+// DispatchWithPriority dispatches a task asynchronously with custom priority.
 // The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
 func (t *Task) DispatchWithPriority(ctx context.Context, priority Priority, input interface{}) error {
 	ctx = withSettings(context.Background(), t.Publisher.Settings())
@@ -112,7 +112,7 @@ func (t *Task) DispatchWithPriority(ctx context.Context, priority Priority, inpu
 	return t.Publisher.Publish(ctx, message)
 }
 
-// Dispatch a task asynchronously with context.
+// DispatchWithContext dispatches a task asynchronously with context.
 // The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
 func (t *Task) DispatchWithContext(ctx context.Context, input interface{}) error {
 	return t.DispatchWithPriority(ctx, t.Priority(), input)

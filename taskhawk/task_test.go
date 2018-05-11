@@ -143,7 +143,7 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 
 	input := &SendEmailTaskInput{}
 
-	publisherRequestId := uuid.Must(uuid.NewV4()).String()
+	publisherRequestID := uuid.Must(uuid.NewV4()).String()
 
 	fakePublisher.settings = &Settings{
 		AWSAccountID: "1234567890",
@@ -152,14 +152,14 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 		AWSSecretKey: "fake_secret_2",
 		Queue:        "dev-myapp",
 		DefaultHeaders: func(ITask) map[string]string {
-			return map[string]string{"request_id": publisherRequestId}
+			return map[string]string{"request_id": publisherRequestID}
 		},
 	}
 
 	ctxWithSettings := withSettings(context.Background(), task.Publisher.Settings())
 
 	expectedMessage := &message{
-		Headers: map[string]string{"request_id": publisherRequestId},
+		Headers: map[string]string{"request_id": publisherRequestID},
 		ID:      "message-id",
 		Input:   input,
 		Metadata: &metadata{

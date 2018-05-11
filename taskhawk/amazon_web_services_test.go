@@ -116,7 +116,7 @@ func TestAmazonWebServices_EnsureQueueUrl(t *testing.T) {
 	settings := getQueueTestSettings()
 	priority := PriorityHigh
 	queueName := getSQSQueue(withSettings(context.Background(), settings), priority)
-	expectedQueueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	expectedQueueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
 
 	fakeSqs := &FakeSQS{}
 	awsClient := &amazonWebServices{
@@ -127,22 +127,22 @@ func TestAmazonWebServices_EnsureQueueUrl(t *testing.T) {
 		QueueName: &queueName,
 	}
 	output := &sqs.GetQueueUrlOutput{
-		QueueUrl: &expectedQueueUrl,
+		QueueUrl: &expectedQueueURL,
 	}
 
 	ctx := withSettings(context.Background(), settings)
 
 	fakeSqs.On("GetQueueUrlWithContext", ctx, expectedInput).Return(output, nil)
 
-	queueUrl, err := awsClient.ensureQueueUrl(ctx, priority)
+	queueURL, err := awsClient.ensureQueueURL(ctx, priority)
 	assert.NoError(t, err)
-	assert.Equal(t, expectedQueueUrl, *queueUrl)
+	assert.Equal(t, expectedQueueURL, *queueURL)
 	fakeSqs.AssertExpectations(t)
 
 	// another call shouldn't call API
-	queueUrl, err = awsClient.ensureQueueUrl(ctx, priority)
+	queueURL, err = awsClient.ensureQueueURL(ctx, priority)
 	assert.NoError(t, err)
-	assert.Equal(t, expectedQueueUrl, *queueUrl)
+	assert.Equal(t, expectedQueueURL, *queueURL)
 	fakeSqs.AssertExpectations(t)
 }
 
@@ -196,12 +196,12 @@ func TestAmazonWebServices_PublishSNS(t *testing.T) {
 func TestAmazonWebServices_SendMessageSQS(t *testing.T) {
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
 	awsClient := &amazonWebServices{
 		sqs: fakeSqs,
 		// pre-filled cache
 		queueUrls: map[Priority]*string{
-			PriorityHigh: &queueUrl,
+			PriorityHigh: &queueURL,
 		},
 	}
 
@@ -221,7 +221,7 @@ func TestAmazonWebServices_SendMessageSQS(t *testing.T) {
 	}
 
 	expectedSendMessageInput := &sqs.SendMessageInput{
-		QueueUrl:          &queueUrl,
+		QueueUrl:          &queueURL,
 		MessageBody:       aws.String(string(msgJSON)),
 		MessageAttributes: attributes,
 	}
@@ -242,9 +242,9 @@ func TestAmazonWebServices_messageHandlerFailsOnValidationFailure(t *testing.T) 
 	receipt := uuid.Must(uuid.NewV4()).String()
 	message := getValidMessage(nil)
 	message.ID = ""
-	messageJson, err := json.Marshal(message)
+	messageJSON, err := json.Marshal(message)
 	require.NoError(t, err)
-	err = awsClient.messageHandler(context.Background(), string(messageJson), receipt)
+	err = awsClient.messageHandler(context.Background(), string(messageJSON), receipt)
 	assert.EqualError(t, err, "missing required data")
 }
 
@@ -258,9 +258,9 @@ func TestAmazonWebServices_messageHandlerFailsOnTaskFailure(t *testing.T) {
 
 	awsClient := amazonWebServices{}
 	receipt := uuid.Must(uuid.NewV4()).String()
-	messageJson, err := json.Marshal(getValidMessage(nil))
+	messageJSON, err := json.Marshal(getValidMessage(nil))
 	require.NoError(t, err)
-	err = awsClient.messageHandler(ctx, string(messageJson), receipt)
+	err = awsClient.messageHandler(ctx, string(messageJSON), receipt)
 	assert.EqualError(t, err, "oops")
 
 	task.AssertExpectations(t)
@@ -269,8 +269,8 @@ func TestAmazonWebServices_messageHandlerFailsOnTaskFailure(t *testing.T) {
 func TestAmazonWebServices_messageHandlerFailsOnBadJSON(t *testing.T) {
 	awsClient := amazonWebServices{}
 	receipt := uuid.Must(uuid.NewV4()).String()
-	messageJson := "bad json-"
-	err := awsClient.messageHandler(context.Background(), string(messageJson), receipt)
+	messageJSON := "bad json-"
+	err := awsClient.messageHandler(context.Background(), string(messageJSON), receipt)
 	assert.NotNil(t, err)
 }
 
@@ -284,9 +284,9 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
 	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
-		QueueUrl:            &queueUrl,
+		QueueUrl:            &queueURL,
 		MaxNumberOfMessages: aws.Int64(10),
 		VisibilityTimeout:   aws.Int64(10),
 		WaitTimeSeconds:     aws.Int64(sqsWaitTimeoutSeconds),
@@ -313,7 +313,7 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 		}
 
 		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
-			QueueUrl:      &queueUrl,
+			QueueUrl:      &queueURL,
 			ReceiptHandle: outMessages[i].ReceiptHandle,
 		}
 		fakeSqs.On("DeleteMessageWithContext", ctx, expectedDeleteMessageInput).Return(
@@ -330,7 +330,7 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 		sqs: fakeSqs,
 		// pre-filled cache
 		queueUrls: map[Priority]*string{
-			PriorityHigh: &queueUrl,
+			PriorityHigh: &queueURL,
 		},
 	}
 	err := awsClient.FetchAndProcessMessages(
@@ -354,9 +354,9 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
 	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
-		QueueUrl:            &queueUrl,
+		QueueUrl:            &queueURL,
 		MaxNumberOfMessages: aws.Int64(10),
 		VisibilityTimeout:   aws.Int64(10),
 		WaitTimeSeconds:     aws.Int64(sqsWaitTimeoutSeconds),
@@ -390,7 +390,7 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 		sqs: fakeSqs,
 		// pre-filled cache
 		queueUrls: map[Priority]*string{
-			PriorityHigh: &queueUrl,
+			PriorityHigh: &queueURL,
 		},
 	}
 	err = awsClient.FetchAndProcessMessages(
@@ -436,9 +436,9 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
 	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
-		QueueUrl:            &queueUrl,
+		QueueUrl:            &queueURL,
 		MaxNumberOfMessages: aws.Int64(10),
 		VisibilityTimeout:   aws.Int64(10),
 		WaitTimeSeconds:     aws.Int64(sqsWaitTimeoutSeconds),
@@ -465,7 +465,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 		}
 
 		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
-			QueueUrl:      &queueUrl,
+			QueueUrl:      &queueURL,
 			ReceiptHandle: outMessages[i].ReceiptHandle,
 		}
 		fakeSqs.On("DeleteMessageWithContext", ctx, expectedDeleteMessageInput).Return(
@@ -484,7 +484,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 		sqs: fakeSqs,
 		// pre-filled cache
 		queueUrls: map[Priority]*string{
-			PriorityHigh: &queueUrl,
+			PriorityHigh: &queueURL,
 		},
 	}
 	err := awsClient.FetchAndProcessMessages(
@@ -710,6 +710,6 @@ func TestNewAmazonWebServices(t *testing.T) {
 
 	sessionCache := &AWSSessionsCache{}
 
-	iaws := newAmazonWebServices(sessionCache, ctx)
+	iaws := newAmazonWebServices(ctx, sessionCache)
 	assert.NotNil(t, iaws)
 }

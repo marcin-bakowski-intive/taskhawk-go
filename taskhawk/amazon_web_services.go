@@ -100,11 +100,11 @@ func (a *amazonWebServices) PublishSNS(ctx context.Context, priority Priority, p
 	return err
 }
 
-func (a *amazonWebServices) ensureQueueUrl(ctx context.Context, priority Priority) (*string, error) {
+func (a *amazonWebServices) ensureQueueURL(ctx context.Context, priority Priority) (*string, error) {
 	if a.queueUrls == nil {
 		a.queueUrls = make(map[Priority]*string)
 	}
-	queueUrl, ok := a.queueUrls[priority]
+	queueURL, ok := a.queueUrls[priority]
 	if !ok {
 		queueName := getSQSQueue(ctx, priority)
 		out, err := a.sqs.GetQueueUrlWithContext(
@@ -116,9 +116,9 @@ func (a *amazonWebServices) ensureQueueUrl(ctx context.Context, priority Priorit
 			return nil, err
 		}
 		a.queueUrls[priority] = out.QueueUrl
-		queueUrl = out.QueueUrl
+		queueURL = out.QueueUrl
 	}
-	return queueUrl, nil
+	return queueURL, nil
 }
 
 // PublishSqs handles publishing to AWS SNS
@@ -133,7 +133,7 @@ func (a *amazonWebServices) SendMessageSQS(ctx context.Context, priority Priorit
 		}
 	}
 
-	queueUrl, err := a.ensureQueueUrl(ctx, priority)
+	queueURL, err := a.ensureQueueURL(ctx, priority)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func (a *amazonWebServices) SendMessageSQS(ctx context.Context, priority Priorit
 	_, err = a.sqs.SendMessageWithContext(
 		ctx,
 		&sqs.SendMessageInput{
-			QueueUrl:          queueUrl,
+			QueueUrl:          queueURL,
 			MessageBody:       &payload,
 			MessageAttributes: attributes,
 		},
@@ -187,7 +187,7 @@ func (w *waitGroupError) DoneWithError(err error) {
 	w.Done()
 }
 
-func (a *amazonWebServices) processRecord(wge *waitGroupError, ctx context.Context, record *events.SNSEventRecord) {
+func (a *amazonWebServices) processRecord(ctx context.Context, wge *waitGroupError, record *events.SNSEventRecord) {
 
 	getPreProcessHookLambdaApp(ctx)(record)
 	err := a.messageHandlerLambda(ctx, record)
@@ -207,7 +207,7 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent even
 			break
 		default:
 			wge.Add(1)
-			go a.processRecord(&wge, ctx, &snsEvent.Records[i])
+			go a.processRecord(ctx, &wge, &snsEvent.Records[i])
 		}
 	}
 	wge.Wait()
@@ -218,21 +218,21 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent even
 	return wge.Error
 }
 
-func (a *amazonWebServices) processMessage(wg *sync.WaitGroup, ctx context.Context, queueMessage *sqs.Message,
-	queueUrl *string, queueName string) {
+func (a *amazonWebServices) processMessage(ctx context.Context, wg *sync.WaitGroup, queueMessage *sqs.Message,
+	queueURL *string, queueName string) {
 	defer wg.Done()
 	getPreProcessHookQueueApp(ctx)(&queueName, queueMessage)
 	err := a.messageHandlerSQS(ctx, queueMessage)
 	switch err {
 	case nil:
 		_, err := a.sqs.DeleteMessageWithContext(ctx, &sqs.DeleteMessageInput{
-			QueueUrl:      queueUrl,
+			QueueUrl:      queueURL,
 			ReceiptHandle: queueMessage.ReceiptHandle,
 		})
 		if err != nil {
 			logrus.Errorf("Failed to delete message with error: %v", err)
 		}
-	case RetryException:
+	case ErrRetry:
 		logrus.Debug("Retrying due to exception")
 	default:
 		logrus.Errorf("Retrying due to unknown exception: %v", err)
@@ -243,14 +243,14 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
 	numMessages uint, visibilityTimeoutS uint) error {
 
 	queueName := getSQSQueue(ctx, priority)
-	queueUrl, err := a.ensureQueueUrl(ctx, priority)
+	queueURL, err := a.ensureQueueURL(ctx, priority)
 	if err != nil {
 		return err
 	}
 
 	input := &sqs.ReceiveMessageInput{
 		MaxNumberOfMessages: aws.Int64(int64(numMessages)),
-		QueueUrl:            queueUrl,
+		QueueUrl:            queueURL,
 		WaitTimeSeconds:     aws.Int64(sqsWaitTimeoutSeconds),
 	}
 	if visibilityTimeoutS != 0 {
@@ -258,6 +258,9 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
 	}
 
 	out, err := a.sqs.ReceiveMessageWithContext(ctx, input)
+	if err != nil {
+		return err
+	}
 	wg := sync.WaitGroup{}
 	for _, queueMessage := range out.Messages {
 		select {
@@ -265,7 +268,7 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
 			break
 		default:
 			wg.Add(1)
-			go a.processMessage(&wg, ctx, queueMessage, queueUrl, queueName)
+			go a.processMessage(ctx, &wg, queueMessage, queueURL, queueName)
 		}
 	}
 	wg.Wait()
@@ -273,7 +276,7 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
 	return ctx.Err()
 }
 
-func newAmazonWebServices(sessionCache *AWSSessionsCache, ctx context.Context) iamazonWebServices {
+func newAmazonWebServices(ctx context.Context, sessionCache *AWSSessionsCache) iamazonWebServices {
 	awsSession := sessionCache.GetSession(ctx)
 	amazonWebServices := amazonWebServices{
 		sns:       sns.New(awsSession),

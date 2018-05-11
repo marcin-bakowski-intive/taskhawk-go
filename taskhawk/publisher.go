@@ -36,9 +36,9 @@ func (ap *publisher) Publish(ctx context.Context, message *message) error {
 
 	if getIsLambdaApp(ctx) {
 		return ap.awsClient.PublishSNS(ctx, message.Metadata.Priority, string(msgJSON), message.Headers)
-	} else {
-		return ap.awsClient.SendMessageSQS(ctx, message.Metadata.Priority, string(msgJSON), message.Headers)
 	}
+
+	return ap.awsClient.SendMessageSQS(ctx, message.Metadata.Priority, string(msgJSON), message.Headers)
 }
 
 func (ap *publisher) Settings() *Settings {
@@ -48,7 +48,7 @@ func (ap *publisher) Settings() *Settings {
 // NewPublisher creates a new publisher
 func NewPublisher(sessionCache *AWSSessionsCache, settings *Settings) IPublisher {
 	return &publisher{
-		awsClient: newAmazonWebServices(sessionCache, withSettings(context.Background(), settings)),
+		awsClient: newAmazonWebServices(withSettings(context.Background(), settings), sessionCache),
 		settings:  settings,
 	}
 }
