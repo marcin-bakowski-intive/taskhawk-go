@@ -132,7 +132,7 @@ you'll need to run these on separate goroutines.
 A consumer for Lambda based workers can be started as following:
 
 	consumer := taskhawk.NewLambdaConsumer(sessionCache, settings)
-	consumer.HandleLambdaEvent(ctx, snsEvent)
+	consumer.HandleLambdaEvent(ctx, &snsEvent)
 
 where snsEvent is the event provided by AWS to your Lambda
 function as described in AWS documentation: https://docs.aws.amazon.com/lambda/latest/dg/eventsources.html#eventsources-sns.

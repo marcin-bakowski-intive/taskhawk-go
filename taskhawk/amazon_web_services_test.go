@@ -107,7 +107,7 @@ func (fa *FakeAWS) FetchAndProcessMessages(ctx context.Context, priority Priorit
 	return args.Error(0)
 }
 
-func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, snsEvent events.SNSEvent) error {
+func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
 	args := fa.Called(ctx, snsEvent)
 	return args.Error(0)
 }
@@ -116,7 +116,7 @@ func TestAmazonWebServices_EnsureQueueUrl(t *testing.T) {
 	settings := getQueueTestSettings()
 	priority := PriorityHigh
 	queueName := getSQSQueue(withSettings(context.Background(), settings), priority)
-	expectedQueueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	expectedQueueURL := "https://sqs.us-east-1.amazonaws.com/1234567890/" + queueName
 
 	fakeSqs := &FakeSQS{}
 	awsClient := &amazonWebServices{
@@ -196,7 +196,7 @@ func TestAmazonWebServices_PublishSNS(t *testing.T) {
 func TestAmazonWebServices_SendMessageSQS(t *testing.T) {
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/1234567890/" + queueName
 	awsClient := &amazonWebServices{
 		sqs: fakeSqs,
 		// pre-filled cache
@@ -284,7 +284,7 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/1234567890/" + queueName
 	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
 		QueueUrl:            &queueURL,
 		MaxNumberOfMessages: aws.Int64(10),
@@ -354,7 +354,7 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/1234567890/" + queueName
 	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
 		QueueUrl:            &queueURL,
 		MaxNumberOfMessages: aws.Int64(10),
@@ -409,12 +409,14 @@ type preProcessHook struct {
 	mock.Mock
 }
 
-func (p *preProcessHook) PreProcessHookQueueApp(queueName *string, queueMessage *sqs.Message) {
-	p.Called(queueName, queueMessage)
+func (p *preProcessHook) PreProcessHookQueueApp(request *QueueRequest) error {
+	args := p.Called(request)
+	return args.Error(0)
 }
 
-func (p *preProcessHook) PreProcessHookLambdaApp(record *events.SNSEventRecord) {
-	p.Called(record)
+func (p *preProcessHook) PreProcessHookLambdaApp(request *LambdaRequest) error {
+	args := p.Called(request)
+	return args.Error(0)
 }
 
 func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
@@ -436,7 +438,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
-	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueURL := "https://sqs.us-east-1.amazonaws.com/1234567890/" + queueName
 	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
 		QueueUrl:            &queueURL,
 		MaxNumberOfMessages: aws.Int64(10),
@@ -471,7 +473,13 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 		fakeSqs.On("DeleteMessageWithContext", ctx, expectedDeleteMessageInput).Return(
 			&sqs.DeleteMessageOutput{}, nil)
 
-		preProcessHook.On("PreProcessHookQueueApp", &queueName, outMessages[i]).Return(nil)
+		queueRequest := &QueueRequest{
+			Ctx:          ctx,
+			QueueURL:     queueURL,
+			QueueName:    queueName,
+			QueueMessage: outMessages[i],
+		}
+		preProcessHook.On("PreProcessHookQueueApp", queueRequest).Return(nil)
 	}
 
 	receiveMessageOutput := &sqs.ReceiveMessageOutput{
@@ -490,6 +498,89 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 	err := awsClient.FetchAndProcessMessages(
 		ctx, PriorityHigh, 10, 10,
 	)
+	assert.NoError(t, err)
+	task.AssertExpectations(t)
+
+	preProcessHook.AssertExpectations(t)
+}
+
+func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
+	preProcessHook := &preProcessHook{}
+
+	settings := &Settings{
+		AWSRegion:    "us-east-1",
+		AWSAccountID: "1234567890",
+		AWSAccessKey: "fake_access_1",
+		AWSSecretKey: "fake_secret_2",
+		Queue:        "dev-myapp",
+		PreProcessHookQueueApp: preProcessHook.PreProcessHookQueueApp,
+	}
+	ctx := withSettings(context.Background(), settings)
+
+	task := NewSendEmailTask()
+	require.NoError(t, RegisterTask(task))
+	defer CleanupTaskRegistry()
+
+	fakeSqs := &FakeSQS{}
+	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
+	queueUrl := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	expectedReceiveMessageInput := &sqs.ReceiveMessageInput{
+		QueueUrl:            &queueUrl,
+		MaxNumberOfMessages: aws.Int64(10),
+		VisibilityTimeout:   aws.Int64(10),
+		WaitTimeSeconds:     aws.Int64(sqsWaitTimeoutSeconds),
+	}
+
+	outMessages := make([]*sqs.Message, 2)
+	for i := 0; i < 2; i++ {
+		input := &SendEmailTaskInput{
+			To:      fmt.Sprintf("mail%d@example.com", i),
+			From:    "mail@spammer.com",
+			Subject: "Hi there!",
+		}
+
+		message := getValidMessage(input)
+		msgJSON, err := json.Marshal(message)
+		require.NoError(t, err)
+
+		outMessages[i] = &sqs.Message{
+			Body:          aws.String(string(msgJSON)),
+			ReceiptHandle: aws.String(uuid.Must(uuid.NewV4()).String()),
+		}
+
+		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
+			QueueUrl:      &queueUrl,
+			ReceiptHandle: outMessages[i].ReceiptHandle,
+		}
+		fakeSqs.On("DeleteMessageWithContext", ctx, expectedDeleteMessageInput).Return(
+			&sqs.DeleteMessageOutput{}, nil)
+
+		queueRequest := &QueueRequest{
+			Ctx:          ctx,
+			QueueURL:     queueUrl,
+			QueueName:    queueName,
+			QueueMessage: outMessages[i],
+		}
+		preProcessHook.On("PreProcessHookQueueApp", queueRequest).Return(errors.New("oops"))
+	}
+
+	receiveMessageOutput := &sqs.ReceiveMessageOutput{
+		Messages: outMessages,
+	}
+	fakeSqs.On("ReceiveMessageWithContext", ctx, expectedReceiveMessageInput).Return(
+		receiveMessageOutput, nil)
+
+	awsClient := &amazonWebServices{
+		sqs: fakeSqs,
+		// pre-filled cache
+		queueUrls: map[Priority]*string{
+			PriorityHigh: &queueUrl,
+		},
+	}
+	err := awsClient.FetchAndProcessMessages(
+		ctx, PriorityHigh, 10, 10,
+	)
+	// the error is NOT bubbled up
 	assert.NoError(t, err)
 	task.AssertExpectations(t)
 
@@ -540,14 +631,79 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 			},
 		}
 
-		preProcessHook.On("PreProcessHookLambdaApp", &snsRecords[i]).Return(nil)
+		lambdaRequest := &LambdaRequest{
+			Ctx:    ctx,
+			Record: &snsRecords[i],
+		}
+
+		preProcessHook.On("PreProcessHookLambdaApp", lambdaRequest).Return(nil)
 	}
-	snsEvent := events.SNSEvent{
+	snsEvent := &events.SNSEvent{
 		Records: snsRecords,
 	}
 
 	err := awsClient.HandleLambdaEvent(ctx, snsEvent)
 	assert.NoError(t, err)
+
+	task.AssertExpectations(t)
+
+	preProcessHook.AssertExpectations(t)
+}
+
+func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
+	preProcessHook := &preProcessHook{}
+
+	awsClient := &amazonWebServices{}
+
+	settings := &Settings{
+		AWSRegion:    "us-east-1",
+		AWSAccountID: "1234567890",
+		AWSAccessKey: "fake_access_1",
+		AWSSecretKey: "fake_secret_2",
+		Queue:        "dev-myapp",
+		IsLambdaApp:  true,
+
+		PreProcessHookLambdaApp: preProcessHook.PreProcessHookLambdaApp,
+	}
+	ctx := withSettings(context.Background(), settings)
+
+	task := NewSendEmailTask()
+	require.NoError(t, RegisterTask(task))
+	defer CleanupTaskRegistry()
+
+	snsRecords := make([]events.SNSEventRecord, 2)
+
+	for i := 0; i < 2; i++ {
+		input := &SendEmailTaskInput{
+			To:      fmt.Sprintf("mail%d@example.com", i),
+			From:    "mail@spammer.com",
+			Subject: "Hi there!",
+		}
+
+		message := getValidMessage(input)
+		msgJSON, err := json.Marshal(message)
+		require.NoError(t, err)
+
+		snsRecords[i] = events.SNSEventRecord{
+			SNS: events.SNSEntity{
+				MessageID: uuid.Must(uuid.NewV4()).String(),
+				Message:   string(msgJSON),
+			},
+		}
+
+		lambdaRequest := &LambdaRequest{
+			Ctx:    ctx,
+			Record: &snsRecords[i],
+		}
+
+		preProcessHook.On("PreProcessHookLambdaApp", lambdaRequest).Return(errors.New("oops"))
+	}
+	snsEvent := &events.SNSEvent{
+		Records: snsRecords,
+	}
+
+	err := awsClient.HandleLambdaEvent(ctx, snsEvent)
+	assert.EqualError(t, err, "oops")
 
 	task.AssertExpectations(t)
 
@@ -595,7 +751,7 @@ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
 			},
 		}
 	}
-	snsEvent := events.SNSEvent{
+	snsEvent := &events.SNSEvent{
 		Records: snsRecords,
 	}
 
@@ -632,7 +788,7 @@ func TestAmazonWebServices_HandleLambdaEventForwardTaskError(t *testing.T) {
 	msgJSON, err := json.Marshal(message)
 	require.NoError(t, err)
 
-	snsEvent := events.SNSEvent{
+	snsEvent := &events.SNSEvent{
 		Records: []events.SNSEventRecord{
 			{
 				SNS: events.SNSEntity{
@@ -685,7 +841,7 @@ func TestAmazonWebServices_HandleLambdaEventContextCancel(t *testing.T) {
 			},
 		}
 	}
-	snsEvent := events.SNSEvent{
+	snsEvent := &events.SNSEvent{
 		Records: records,
 	}
 

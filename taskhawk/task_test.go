@@ -143,20 +143,21 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 
 	input := &SendEmailTaskInput{}
 
-	publisherRequestID := uuid.Must(uuid.NewV4()).String()
-
 	fakePublisher.settings = &Settings{
 		AWSAccountID: "1234567890",
 		AWSRegion:    "us-east-1",
 		AWSAccessKey: "fake_access_1",
 		AWSSecretKey: "fake_secret_2",
 		Queue:        "dev-myapp",
-		DefaultHeaders: func(ITask) map[string]string {
-			return map[string]string{"request_id": publisherRequestID}
+		DefaultHeaders: func(ctx context.Context, _ ITask) map[string]string {
+			return map[string]string{"request_id": ctx.Value("request_id").(string)}
 		},
 	}
 
-	ctxWithSettings := withSettings(context.Background(), task.Publisher.Settings())
+	publisherRequestID := uuid.Must(uuid.NewV4()).String()
+
+	ctxWithRequestId := context.WithValue(context.Background(), "request_id", publisherRequestID)
+	ctxWithSettings := withSettings(ctxWithRequestId, task.Publisher.Settings())
 
 	expectedMessage := &message{
 		Headers: map[string]string{"request_id": publisherRequestID},
@@ -171,7 +172,7 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 	}
 	fakePublisher.On("Publish", ctxWithSettings, mock.Anything).Return(nil)
 
-	assert.NoError(t, task.DispatchWithPriority(context.Background(), PriorityLow, input))
+	assert.NoError(t, task.DispatchWithPriority(ctxWithRequestId, PriorityLow, input))
 
 	actual := fakePublisher.Calls[0].Arguments.Get(1).(*message)
 	// don't check dynamic things

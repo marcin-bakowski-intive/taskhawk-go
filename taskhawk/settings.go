@@ -10,19 +10,16 @@ package taskhawk
 import (
 	"context"
 	"fmt"
-
-	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go/service/sqs"
 )
 
 // PreProcessHookQueueApp is the type of the function for pre-process hook for SQS apps
-type PreProcessHookQueueApp func(queueName *string, queueMessage *sqs.Message)
+type PreProcessHookQueueApp func(request *QueueRequest) error
 
 // PreProcessHookLambdaApp is the type of the function for pre-process hook for lambda apps
-type PreProcessHookLambdaApp func(record *events.SNSEventRecord)
+type PreProcessHookLambdaApp func(request *LambdaRequest) error
 
 // DefaultHeaders is the type of the function for injecting custom headers for every task
-type DefaultHeaders func(task ITask) map[string]string
+type DefaultHeaders func(ctx context.Context, task ITask) map[string]string
 
 // Settings is used to create Taskhawk settings
 type Settings struct {
@@ -63,11 +60,15 @@ type Settings struct {
 	Sync bool
 }
 
-func noOpPreProcessHookQueueApp(_ *string, _ *sqs.Message) {}
+func noOpPreProcessHookQueueApp(_ *QueueRequest) error {
+	return nil
+}
 
-func noOpPreProcessHookLambdaApp(_ *events.SNSEventRecord) {}
+func noOpPreProcessHookLambdaApp(_ *LambdaRequest) error {
+	return nil
+}
 
-func emptyDefaultHeaders(task ITask) map[string]string {
+func emptyDefaultHeaders(_ context.Context, _ ITask) map[string]string {
 	return map[string]string{}
 }
 

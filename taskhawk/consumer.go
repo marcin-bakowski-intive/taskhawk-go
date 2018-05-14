@@ -58,7 +58,7 @@ type ILambdaConsumer interface {
 	// header, receipt.
 	//
 	// The error returned by the task is returned to the caller, which should be returned from the Lambda handler.
-	HandleLambdaEvent(ctx context.Context, snsEvent events.SNSEvent) error
+	HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error
 }
 
 const sqsWaitTimeoutSeconds int64 = 20
@@ -71,7 +71,7 @@ type lambdaConsumer struct {
 	settings  *Settings
 }
 
-func (c *lambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent events.SNSEvent) error {
+func (c *lambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
 	ctx = withSettings(ctx, c.settings)
 	if !getIsLambdaApp(ctx) {
 		return errors.New("Can't process lambda event in a SQS consumer")

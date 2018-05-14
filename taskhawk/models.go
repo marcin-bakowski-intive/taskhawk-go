@@ -14,6 +14,9 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go/service/sqs"
 )
 
 // JSONTime is just a wrapper around time that serializes time to epoch in milliseconds
@@ -241,4 +244,20 @@ func (p *Priority) UnmarshalJSON(b []byte) error {
 		return errors.New("unknown priority")
 	}
 	return nil
+}
+
+// QueueRequest represents a request for queue apps
+type QueueRequest struct {
+	Ctx          context.Context
+	Priority     Priority
+	QueueMessage *sqs.Message
+	QueueName    string
+	QueueURL     string
+}
+
+// LambdaRequest represents a request for lambda apps
+type LambdaRequest struct {
+	Ctx      context.Context
+	Priority Priority
+	Record   *events.SNSEventRecord
 }

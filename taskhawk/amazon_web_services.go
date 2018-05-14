@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sns"
@@ -29,7 +31,7 @@ type iamazonWebServices interface {
 		headers map[string]string) error
 	FetchAndProcessMessages(ctx context.Context, priority Priority, numMessages uint,
 		visibilityTimeoutS uint) error
-	HandleLambdaEvent(ctx context.Context, snsEvent events.SNSEvent) error
+	HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error
 }
 
 func getSQSQueue(ctx context.Context, priority Priority) string {
@@ -166,68 +168,65 @@ func (a *amazonWebServices) messageHandler(ctx context.Context, messageBody stri
 	return message.callTask(ctx, receipt)
 }
 
-func (a *amazonWebServices) messageHandlerSQS(ctx context.Context, message *sqs.Message) error {
-	return a.messageHandler(ctx, *message.Body, *message.ReceiptHandle)
+func (a *amazonWebServices) messageHandlerSQS(request *QueueRequest) error {
+	return a.messageHandler(request.Ctx, *request.QueueMessage.Body, *request.QueueMessage.ReceiptHandle)
 }
 
-func (a *amazonWebServices) messageHandlerLambda(ctx context.Context, record *events.SNSEventRecord) error {
-	return a.messageHandler(ctx, record.SNS.Message, "")
+func (a *amazonWebServices) messageHandlerLambda(request *LambdaRequest) error {
+	return a.messageHandler(request.Ctx, request.Record.SNS.Message, "")
 }
 
-// waitGroupError is like sync.WaitGroup but provides one extra field for storing error
-type waitGroupError struct {
-	sync.WaitGroup
-	Error error
-}
-
-// DoneWithError may be used instead .Done() when there's an error
-// This method clobbers the original error so you only see the last set error
-func (w *waitGroupError) DoneWithError(err error) {
-	w.Error = err
-	w.Done()
-}
-
-func (a *amazonWebServices) processRecord(ctx context.Context, wge *waitGroupError, record *events.SNSEventRecord) {
-
-	getPreProcessHookLambdaApp(ctx)(record)
-	err := a.messageHandlerLambda(ctx, record)
+func (a *amazonWebServices) processRecord(ctx context.Context, request *LambdaRequest) error {
+	err := getPreProcessHookLambdaApp(request.Ctx)(request)
+	if err != nil {
+		logrus.Errorf("Pre-process hook failed with error: %v", err)
+		return err
+	}
+	err = a.messageHandlerLambda(request)
 	if err == nil {
-		wge.Done()
-		return
+		return nil
 	}
 	logrus.Errorf("failed to process lambda event with error: %v", err)
-	wge.DoneWithError(err)
+	return err
 }
 
-func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent events.SNSEvent) error {
-	wge := waitGroupError{}
+func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
+	wg, childCtx := errgroup.WithContext(ctx)
 	for i := range snsEvent.Records {
+		request := &LambdaRequest{
+			Ctx:    ctx,
+			Record: &snsEvent.Records[i],
+		}
 		select {
 		case <-ctx.Done():
 			break
 		default:
-			wge.Add(1)
-			go a.processRecord(ctx, &wge, &snsEvent.Records[i])
+			wg.Go(func() error {
+				return a.processRecord(childCtx, request)
+			})
 		}
 	}
-	wge.Wait()
+	err := wg.Wait()
 	if ctx.Err() != nil {
 		// if context was cancelled, signal appropriately
 		return ctx.Err()
 	}
-	return wge.Error
+	return err
 }
 
-func (a *amazonWebServices) processMessage(ctx context.Context, wg *sync.WaitGroup, queueMessage *sqs.Message,
-	queueURL *string, queueName string) {
+func (a *amazonWebServices) processMessage(wg *sync.WaitGroup, request *QueueRequest) {
 	defer wg.Done()
-	getPreProcessHookQueueApp(ctx)(&queueName, queueMessage)
-	err := a.messageHandlerSQS(ctx, queueMessage)
+	err := getPreProcessHookQueueApp(request.Ctx)(request)
+	if err != nil {
+		logrus.Errorf("Pre-process hook failed with error: %v", err)
+		return
+	}
+	err = a.messageHandlerSQS(request)
 	switch err {
 	case nil:
-		_, err := a.sqs.DeleteMessageWithContext(ctx, &sqs.DeleteMessageInput{
-			QueueUrl:      queueURL,
-			ReceiptHandle: queueMessage.ReceiptHandle,
+		_, err := a.sqs.DeleteMessageWithContext(request.Ctx, &sqs.DeleteMessageInput{
+			QueueUrl:      &request.QueueURL,
+			ReceiptHandle: request.QueueMessage.ReceiptHandle,
 		})
 		if err != nil {
 			logrus.Errorf("Failed to delete message with error: %v", err)
@@ -263,12 +262,18 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
 	}
 	wg := sync.WaitGroup{}
 	for _, queueMessage := range out.Messages {
+		request := &QueueRequest{
+			Ctx:          ctx,
+			QueueMessage: queueMessage,
+			QueueURL:     *queueURL,
+			QueueName:    queueName,
+		}
 		select {
 		case <-ctx.Done():
 			break
 		default:
 			wg.Add(1)
-			go a.processMessage(ctx, &wg, queueMessage, queueURL, queueName)
+			go a.processMessage(&wg, request)
 		}
 	}
 	wg.Wait()

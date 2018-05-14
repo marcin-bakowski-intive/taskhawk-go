@@ -93,7 +93,7 @@ func TestConsumer_HandleLambdaEvent(t *testing.T) {
 	ctx := context.Background()
 	ctxWithSettings := withSettings(context.Background(), settings)
 
-	snsEvent := events.SNSEvent{
+	snsEvent := &events.SNSEvent{
 		Records: []events.SNSEventRecord{
 			{
 				SNS: events.SNSEntity{
@@ -121,7 +121,7 @@ func TestConsumer_HandleLambdaEventFailSQS(t *testing.T) {
 		awsClient: &FakeAWS{},
 		settings:  settings,
 	}
-	err := consumer.HandleLambdaEvent(ctx, events.SNSEvent{})
+	err := consumer.HandleLambdaEvent(ctx, &events.SNSEvent{})
 	assert.EqualError(t, err, "Can't process lambda event in a SQS consumer")
 }
 

@@ -76,7 +76,7 @@ func (t *Task) Priority() Priority {
 // DispatchWithPriority dispatches a task asynchronously with custom priority.
 // The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
 func (t *Task) DispatchWithPriority(ctx context.Context, priority Priority, input interface{}) error {
-	ctx = withSettings(context.Background(), t.Publisher.Settings())
+	ctx = withSettings(ctx, t.Publisher.Settings())
 
 	taskDef, ok := taskRegistry[t.Name()]
 	if !ok {
@@ -85,7 +85,7 @@ func (t *Task) DispatchWithPriority(ctx context.Context, priority Priority, inpu
 	}
 
 	headers := make(map[string]string)
-	for key, value := range getDefaultHeaders(ctx)(taskDef) {
+	for key, value := range getDefaultHeaders(ctx)(ctx, taskDef) {
 		headers[key] = value
 	}
 	if inputTaskHeaders, ok := input.(ITaskHeaders); ok {
