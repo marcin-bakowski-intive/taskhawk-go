@@ -176,7 +176,7 @@ func (a *amazonWebServices) messageHandlerLambda(request *LambdaRequest) error {
 	return a.messageHandler(request.Ctx, request.Record.SNS.Message, "")
 }
 
-func (a *amazonWebServices) processRecord(ctx context.Context, request *LambdaRequest) error {
+func (a *amazonWebServices) processRecord(request *LambdaRequest) error {
 	err := getPreProcessHookLambdaApp(request.Ctx)(request)
 	if err != nil {
 		logrus.Errorf("Pre-process hook failed with error: %v", err)
@@ -194,7 +194,7 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent *eve
 	wg, childCtx := errgroup.WithContext(ctx)
 	for i := range snsEvent.Records {
 		request := &LambdaRequest{
-			Ctx:    ctx,
+			Ctx:    childCtx,
 			Record: &snsEvent.Records[i],
 		}
 		select {
@@ -202,7 +202,7 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent *eve
 			break
 		default:
 			wg.Go(func() error {
-				return a.processRecord(childCtx, request)
+				return a.processRecord(request)
 			})
 		}
 	}

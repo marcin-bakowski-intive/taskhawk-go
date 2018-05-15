@@ -618,7 +618,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 		}
 		// copy object before anyone else modifies it
 		expected := *input
-		task.On("Run", ctx, &expected).Return(nil)
+		task.On("Run", mock.Anything, &expected).Return(nil)
 
 		message := getValidMessage(input)
 		msgJSON, err := json.Marshal(message)
@@ -632,11 +632,16 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 		}
 
 		lambdaRequest := &LambdaRequest{
-			Ctx:    ctx,
 			Record: &snsRecords[i],
 		}
 
-		preProcessHook.On("PreProcessHookLambdaApp", lambdaRequest).Return(nil)
+		requestMatcher := func(request2 *LambdaRequest) bool {
+			return lambdaRequest.Record == request2.Record
+		}
+
+		preProcessHook.
+			On("PreProcessHookLambdaApp", mock.MatchedBy(requestMatcher)).
+			Return(nil)
 	}
 	snsEvent := &events.SNSEvent{
 		Records: snsRecords,
@@ -692,11 +697,16 @@ func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
 		}
 
 		lambdaRequest := &LambdaRequest{
-			Ctx:    ctx,
 			Record: &snsRecords[i],
 		}
 
-		preProcessHook.On("PreProcessHookLambdaApp", lambdaRequest).Return(errors.New("oops"))
+		requestMatcher := func(request2 *LambdaRequest) bool {
+			return lambdaRequest.Record == request2.Record
+		}
+
+		preProcessHook.
+			On("PreProcessHookLambdaApp", mock.MatchedBy(requestMatcher)).
+			Return(errors.New("oops"))
 	}
 	snsEvent := &events.SNSEvent{
 		Records: snsRecords,
@@ -738,7 +748,7 @@ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
 		}
 		// copy object before anyone else modifies it
 		expected := *input
-		task.On("Run", ctx, &expected).Return(nil)
+		task.On("Run", mock.Anything, &expected).Return(nil)
 
 		message := getValidMessage(input)
 		msgJSON, err := json.Marshal(message)
@@ -782,7 +792,7 @@ func TestAmazonWebServices_HandleLambdaEventForwardTaskError(t *testing.T) {
 	}
 	// copy object before anyone else modifies it
 	expected := *input
-	task.On("Run", ctx, &expected).Return(errors.New("oops"))
+	task.On("Run", mock.Anything, &expected).Return(errors.New("oops"))
 
 	message := getValidMessage(input)
 	msgJSON, err := json.Marshal(message)
@@ -827,7 +837,7 @@ func TestAmazonWebServices_HandleLambdaEventContextCancel(t *testing.T) {
 	}
 	// copy object before anyone else modifies it
 	expected := *input
-	task.On("Run", ctxWithSettings, &expected).Return(nil)
+	task.On("Run", mock.Anything, &expected).Return(nil)
 
 	records := make([]events.SNSEventRecord, 1000)
 	for i := range records {
