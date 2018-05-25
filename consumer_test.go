@@ -9,12 +9,16 @@ package taskhawk
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConsumer_ListenForMessages(t *testing.T) {
@@ -141,4 +145,70 @@ func TestNewLambdaConsumer(t *testing.T) {
 
 	iconsumer := NewLambdaConsumer(sessionCache, settings)
 	assert.NotNil(t, iconsumer)
+}
+
+type fakeLambdaConsumer struct {
+	mock.Mock
+	ILambdaConsumer
+}
+
+func (lambdaConsumer fakeLambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
+	args := lambdaConsumer.Called(ctx, snsEvent)
+	return args.Error(0)
+}
+
+func TestLambdaHandler_Invoke(t *testing.T) {
+	lambdaConsumer := &fakeLambdaConsumer{}
+	handler := LambdaHandler{
+		lambdaConsumer: lambdaConsumer,
+	}
+	ctx := context.Background()
+	snsEvent := &events.SNSEvent{}
+	payload, err := json.Marshal(snsEvent)
+	require.NoError(t, err)
+
+	lambdaConsumer.On("HandleLambdaEvent", ctx, snsEvent).Return(nil)
+
+	response, err := handler.Invoke(ctx, payload)
+	assert.NoError(t, err)
+	assert.Equal(t, []byte(""), response)
+
+	lambdaConsumer.AssertExpectations(t)
+}
+
+func TestLambdaHandler_InvokeFailUnmarshal(t *testing.T) {
+	lambdaConsumer := &fakeLambdaConsumer{}
+	handler := LambdaHandler{
+		lambdaConsumer: lambdaConsumer,
+	}
+	ctx := context.Background()
+
+	response, err := handler.Invoke(ctx, []byte("bad payload"))
+	assert.EqualError(t, err, "invalid character 'b' looking for beginning of value")
+	assert.Nil(t, response)
+}
+
+func TestLambdaHandler_InvokeFailHandler(t *testing.T) {
+	lambdaConsumer := &fakeLambdaConsumer{}
+	handler := LambdaHandler{
+		lambdaConsumer: lambdaConsumer,
+	}
+	ctx := context.Background()
+	snsEvent := &events.SNSEvent{}
+	payload, err := json.Marshal(snsEvent)
+	require.NoError(t, err)
+
+	lambdaConsumer.On("HandleLambdaEvent", ctx, snsEvent).Return(errors.New("oops"))
+
+	response, err := handler.Invoke(ctx, payload)
+	assert.EqualError(t, err, "oops")
+	assert.Nil(t, response)
+
+	lambdaConsumer.AssertExpectations(t)
+}
+
+func TestNewLambdaHandler(t *testing.T) {
+	lambdaConsumer := &fakeLambdaConsumer{}
+	handler := NewLambdaHandler(lambdaConsumer)
+	assert.NotNil(t, handler)
 }

@@ -10,10 +10,10 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 
-	"github.com/pkg/errors"
 	"github.com/satori/go.uuid"
 )
 
