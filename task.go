@@ -10,10 +10,9 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"reflect"
 
+	"github.com/pkg/errors"
 	"github.com/satori/go.uuid"
 )
 
@@ -221,7 +220,7 @@ func (t *taskDef) UnmarshalJSON(b []byte) error {
 	}
 	task, found := taskRegistry[taskName]
 	if !found {
-		return fmt.Errorf("invalid task not found")
+		return errors.Errorf("invalid task not found")
 	}
 	*t = *task
 	return nil
@@ -249,12 +248,12 @@ func RegisterTask(task ITask) error {
 		return errors.New("task name not set")
 	}
 	if _, found := taskRegistry[task.Name()]; found {
-		return fmt.Errorf("task with name '%s' already registered", task.Name())
+		return errors.Errorf("task with name '%s' already registered", task.Name())
 	}
 	inputType := reflect.TypeOf(task.NewInput())
 	if inputType != nil && inputType.Kind() != reflect.Ptr {
 		// since metadata methods are implemented on Ptr type, let's be strict about this to avoid confusion
-		return fmt.Errorf("method NewInput must return a pointer type")
+		return errors.Errorf("method NewInput must return a pointer type")
 	}
 	taskRegistry[task.Name()] = &taskDef{task}
 	return nil

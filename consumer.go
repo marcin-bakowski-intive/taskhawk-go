@@ -10,10 +10,10 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/pkg/errors"
 )
 
 // ListenRequest represents a request to listen for messages

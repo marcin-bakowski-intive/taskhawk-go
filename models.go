@@ -10,13 +10,13 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/pkg/errors"
 )
 
 // JSONTime is just a wrapper around time that serializes time to epoch in milliseconds
@@ -35,17 +35,17 @@ func (t *JSONTime) UnmarshalJSON(b []byte) error {
 		strTime := ""
 		err := json.Unmarshal(b, &strTime)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "unable to unmarshal timestamp")
 		}
 		parsedTime, err := time.Parse(time.RFC3339, strTime)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "unable to parse timestamp")
 		}
 		*t = JSONTime(parsedTime)
 	} else {
 		epochMs, err := strconv.Atoi(string(b))
 		if err != nil {
-			return err
+			return errors.Wrap(err, "unable to unmarshal timestamp")
 		}
 		duration := time.Duration(epochMs) * time.Millisecond
 		epochNS := duration.Nanoseconds()
@@ -139,7 +139,7 @@ func (m *message) validateVersion() error {
 		}
 	}
 	if !validVersion {
-		return fmt.Errorf("invalid version: %s", m.Metadata.Version)
+		return errors.Errorf("invalid version: %s", m.Metadata.Version)
 	}
 	return nil
 }
@@ -156,7 +156,7 @@ func (m *message) validate() error {
 
 	_, ok := taskRegistry[m.Task.Name()]
 	if !ok {
-		return fmt.Errorf("invalid task, not registered: %s", m.Task.Name())
+		return errors.Errorf("invalid task, not registered: %s", m.Task.Name())
 	}
 
 	return nil

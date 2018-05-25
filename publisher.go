@@ -10,6 +10,7 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
+	"github.com/pkg/errors"
 )
 
 // IPublisher interface represents all publish related functions
@@ -31,7 +32,7 @@ type publisher struct {
 func (ap *publisher) Publish(ctx context.Context, message *message) error {
 	msgJSON, err := json.Marshal(message)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "unable to marshal message")
 	}
 
 	if getIsLambdaApp(ctx) {
