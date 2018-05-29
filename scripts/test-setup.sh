@@ -7,9 +7,10 @@ if [[ "${TRAVIS}" == "true" ]]; then
 
     go tool vet .
 
-    gofmt -d .
-    if [ "$?" -ne "0" ]; then
-        echo "Code not properly formatted. Run 'go fmt'"
+    unformatted=$(find . -not -path "./vendor/*" -name "*.go" | xargs gofmt -s -l)
+
+    if [ ! -z "$unformatted" ]; then
+        echo >&2 "Code not properly formatted. Run 'make gofmt'"
         exit 1
     fi
 

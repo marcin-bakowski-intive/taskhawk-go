@@ -428,6 +428,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 		AWSAccessKey: "fake_access_1",
 		AWSSecretKey: "fake_secret_2",
 		Queue:        "dev-myapp",
+
 		PreProcessHookQueueApp: preProcessHook.PreProcessHookQueueApp,
 	}
 	ctx := withSettings(context.Background(), settings)
@@ -513,6 +514,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
 		AWSAccessKey: "fake_access_1",
 		AWSSecretKey: "fake_secret_2",
 		Queue:        "dev-myapp",
+
 		PreProcessHookQueueApp: preProcessHook.PreProcessHookQueueApp,
 	}
 	ctx := withSettings(context.Background(), settings)

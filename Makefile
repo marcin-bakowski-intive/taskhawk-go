@@ -1,5 +1,8 @@
 .PHONY: test
 
+gofmt:
+	./scripts/gofmt.sh
+
 test_setup:
 	./scripts/test-setup.sh
 
