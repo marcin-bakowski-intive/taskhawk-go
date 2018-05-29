@@ -44,8 +44,8 @@ Then, define a few required settings:
 sessionCache := AWSSessionsCache{}
 
 settings := taskhawk.Settings{
-	AWSAccessKey: <YOUR AWS ACCESS KEY>,
-	AWSAccountID: <YOUR AWS ACCOUNT ID>,
+    AWSAccessKey: <YOUR AWS ACCESS KEY>,
+    AWSAccountID: <YOUR AWS ACCOUNT ID>,
     AWSRegion: <YOUR AWS REGION>,
     AWSSecretKey: <YOUR AWS SECRET KEY>,
 
