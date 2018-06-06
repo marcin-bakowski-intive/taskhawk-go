@@ -54,7 +54,7 @@ func TestConsumer_ListenForMessagesContextCancel(t *testing.T) {
 	numMessages := uint(10)
 	visibilityTimeoutS := uint(10)
 	awsClient.On("FetchAndProcessMessages", ctxWithSettings, PriorityHigh, numMessages,
-		visibilityTimeoutS).Return(nil)
+		visibilityTimeoutS).Return(nil).After(500 * time.Millisecond)
 	consumer := queueConsumer{
 		awsClient: awsClient,
 		settings:  settings,
@@ -73,6 +73,40 @@ func TestConsumer_ListenForMessagesContextCancel(t *testing.T) {
 	}()
 	time.Sleep(1 * time.Millisecond)
 	cancel()
+	// wait for co-routine to finish
+	<-ch
+	awsClient.AssertExpectations(t)
+	assert.True(t, len(awsClient.Calls) < 1000)
+}
+
+func TestConsumer_ListenForMessagesContextDeadline(t *testing.T) {
+	settings := getQueueTestSettings()
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(11*time.Second))
+	ctxWithSettings := withSettings(ctx, settings)
+
+	awsClient := &FakeAWS{}
+	numMessages := uint(10)
+	visibilityTimeoutS := uint(10)
+	awsClient.On("FetchAndProcessMessages", ctxWithSettings, PriorityHigh, numMessages,
+		visibilityTimeoutS).Return(nil).After(500 * time.Millisecond)
+	consumer := queueConsumer{
+		awsClient: awsClient,
+		settings:  settings,
+	}
+	ch := make(chan bool)
+	go func() {
+		err := consumer.ListenForMessages(ctx, &ListenRequest{
+			Priority:           PriorityHigh,
+			NumMessages:        numMessages,
+			VisibilityTimeoutS: visibilityTimeoutS,
+			LoopCount:          1000,
+		})
+		assert.NoError(t, err)
+		ch <- true
+		close(ch)
+	}()
+	time.Sleep(1 * time.Millisecond)
+	defer cancel()
 	// wait for co-routine to finish
 	<-ch
 	awsClient.AssertExpectations(t)

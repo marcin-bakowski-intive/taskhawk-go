@@ -10,6 +10,7 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -47,6 +48,12 @@ type IQueueConsumer interface {
 	// The message is explicitly deleted only if task function ran successfully. In case of an exception the message is
 	// kept on queue and processed again. If the callback keeps failing, SQS dead letter queue mechanism kicks in and
 	// the message is moved to the dead-letter queue.
+	//
+	// This function never returns by default. Possible shutdown methods:
+	// 1. Cancel the context - returns immediately.
+	// 2. Set a deadline on the context of less than 10 seconds - returns after processing current messages.
+	// 3. Run for limited number of loops by setting LoopCount on the request - returns after running loop a finite
+	// number of times
 	ListenForMessages(ctx context.Context, request *ListenRequest) error
 }
 
@@ -102,6 +109,12 @@ func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRe
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+			if deadline, ok := ctx.Deadline(); ok {
+				// is shutting down?
+				if deadline.Sub(time.Now()) < getShutdownTimeout(ctx) {
+					return nil
+				}
+			}
 			if err := c.awsClient.FetchAndProcessMessages(
 				ctx, request.Priority,
 				request.NumMessages, request.VisibilityTimeoutS,

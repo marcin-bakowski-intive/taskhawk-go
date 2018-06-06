@@ -10,6 +10,7 @@ package taskhawk
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // PreProcessHookQueueApp is the type of the function for pre-process hook for SQS apps
@@ -54,6 +55,9 @@ type Settings struct {
 
 	// Queue is the name of the taskhawk queue for this project (exclude the TASKHAWK- prefix)
 	Queue string
+
+	// ShutdownTimeout is the time the app has to shut down before being brutally killed
+	ShutdownTimeout time.Duration // optional; defaults to 10s
 
 	// Sync changes taskhawk dispatch to synchronous mode. This is similar
 	// to Celery's Eager mode and is helpful for integration testing
@@ -119,6 +123,10 @@ func getQueue(ctx context.Context) string {
 	return ctx.Value(settingsKey).(*Settings).Queue
 }
 
+func getShutdownTimeout(ctx context.Context) time.Duration {
+	return ctx.Value(settingsKey).(*Settings).ShutdownTimeout
+}
+
 func getSync(ctx context.Context) bool {
 	return ctx.Value(settingsKey).(*Settings).Sync
 }
@@ -136,6 +144,9 @@ func withDefaults(s *Settings) {
 	}
 	if s.DefaultHeaders == nil {
 		s.DefaultHeaders = DefaultHeaders(emptyDefaultHeaders)
+	}
+	if s.ShutdownTimeout == 0 {
+		s.ShutdownTimeout = 10 * time.Second
 	}
 	return
 }
