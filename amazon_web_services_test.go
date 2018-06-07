@@ -185,7 +185,8 @@ func TestAmazonWebServices_PublishSNS(t *testing.T) {
 
 	ctx := withSettings(context.Background(), settings)
 
-	fakeSns.On("PublishWithContext", ctx, expectedSnsInput).Return((*sns.PublishOutput)(nil), nil)
+	fakeSns.On("PublishWithContext", ctx, expectedSnsInput, mock.Anything).
+		Return((*sns.PublishOutput)(nil), nil)
 
 	err = fakeAWS.PublishSNS(ctx, PriorityHigh, string(msgJSON), message.Headers)
 	assert.NoError(t, err)

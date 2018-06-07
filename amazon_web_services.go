@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aws/aws-sdk-go/aws/request"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/aws/aws-lambda-go/events"
@@ -99,6 +100,7 @@ func (a *amazonWebServices) PublishSNS(ctx context.Context, priority Priority, p
 			Message:           &payload,
 			MessageAttributes: attributes,
 		},
+		request.WithResponseReadTimeout(getAWSReadTimeout(ctx)),
 	)
 	return errors.Wrap(err, "Failed to publish message to SNS")
 }

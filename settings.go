@@ -29,6 +29,9 @@ type Settings struct {
 	AWSAccessKey string
 	AWSSecretKey string
 
+	// AWS read timeout for publisher
+	AWSReadTimeout time.Duration
+
 	// AWSSessionToken represents temporary credentials (for example, for Lambda apps)
 	AWSSessionToken string // optional;
 
@@ -103,6 +106,10 @@ func getAWSSessionToken(ctx context.Context) string {
 	return ctx.Value(settingsKey).(*Settings).AWSSessionToken
 }
 
+func getAWSReadTimeout(ctx context.Context) time.Duration {
+	return ctx.Value(settingsKey).(*Settings).AWSReadTimeout
+}
+
 func getDefaultHeaders(ctx context.Context) DefaultHeaders {
 	return ctx.Value(settingsKey).(*Settings).DefaultHeaders
 }
@@ -147,6 +154,9 @@ func withDefaults(s *Settings) {
 	}
 	if s.ShutdownTimeout == 0 {
 		s.ShutdownTimeout = 10 * time.Second
+	}
+	if s.AWSReadTimeout == 0 {
+		s.AWSReadTimeout = 2 * time.Second
 	}
 	return
 }
