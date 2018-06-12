@@ -45,6 +45,13 @@ type AWSSessionsCache struct {
 	sessionMap sync.Map
 }
 
+// NewAWSSessionsCache creates a new session cache
+func NewAWSSessionsCache() *AWSSessionsCache {
+	return &AWSSessionsCache{
+		sessionMap: sync.Map{},
+	}
+}
+
 func (c *AWSSessionsCache) getOrCreateSession(ctx context.Context) *session.Session {
 	region := getAWSRegion(ctx)
 	awsAccessKey := getAWSAccessKey(ctx)

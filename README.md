@@ -41,7 +41,7 @@ Tasks may accept input of arbitrary type as long as it's serializable to JSON
 Then, define a few required settings:
 
 ```go 
-sessionCache := AWSSessionsCache{}
+sessionCache := NewAWSSessionsCache()
 
 settings := taskhawk.Settings{
     AWSAccessKey: <YOUR AWS ACCESS KEY>,
