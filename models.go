@@ -66,9 +66,10 @@ type message struct {
 	Headers map[string]string `json:"headers"`
 	ID      string            `json:"id"`
 	// the format for message is standard across all services, so use "kwargs" instead of "input"
-	Input    interface{} `json:"kwargs"`
-	Metadata *metadata   `json:"metadata"`
-	Task     *taskDef    `json:"task"`
+	Input        interface{} `json:"kwargs"`
+	Metadata     *metadata   `json:"metadata"`
+	task         *taskDef
+	taskRegistry *TaskRegistry
 }
 
 // Version represents the message format version
@@ -85,6 +86,18 @@ const (
 // versions lists all the valid version for a taskhawk message schema
 var versions = []Version{Version1_0}
 
+func (m message) MarshalJSON() ([]byte, error) {
+	type MessageClone message
+	mClone := &struct {
+		*MessageClone
+		Task *taskDef `json:"task"`
+	}{
+		Task:         m.task,
+		MessageClone: (*MessageClone)(&m),
+	}
+	return json.Marshal(mClone)
+}
+
 // UnmarshalJSON deserializes JSON blob into a message
 func (m *message) UnmarshalJSON(b []byte) error {
 	type MessageClone message
@@ -100,13 +113,32 @@ func (m *message) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	if m.Task == nil {
+	taskContainer := struct {
+		Task json.RawMessage `json:"task"`
+	}{}
+	if err := json.Unmarshal(b, &taskContainer); err != nil {
+		return err
+	}
+
+	if len(taskContainer.Task) == 0 {
+		return errors.New("invalid message, task is required")
+	}
+	if m.taskRegistry == nil {
+		return errors.New("task registry must be set on the message")
+	}
+	td := &taskDef{taskRegistry: m.taskRegistry}
+	if err := json.Unmarshal(taskContainer.Task, td); err != nil {
+		return err
+	}
+	m.task = td
+
+	if m.task == nil {
 		// reset input if we couldn't determine it's type
 		m.Input = nil
 		return nil
 	}
 
-	input := m.Task.NewInput()
+	input := m.task.NewInput()
 	if input == nil {
 		// task doesn't accept input
 		m.Input = nil
@@ -123,7 +155,7 @@ func (m *message) UnmarshalJSON(b []byte) error {
 
 func (m *message) validateRequired() error {
 	if m.ID == "" || m.Metadata == nil || m.Metadata.Version == "" || m.Metadata.Timestamp == JSONTime(time.Time{}) ||
-		m.Headers == nil || m.Task == nil {
+		m.Headers == nil || m.task == nil {
 
 		return errors.New("missing required data")
 	}
@@ -154,9 +186,9 @@ func (m *message) validate() error {
 		return err
 	}
 
-	_, ok := taskRegistry[m.Task.Name()]
-	if !ok {
-		return errors.Errorf("invalid task, not registered: %s", m.Task.Name())
+	_, err := m.taskRegistry.getTask(m.task.Name())
+	if err != nil {
+		return errors.Errorf("invalid task, not registered: %s", m.task.Name())
 	}
 
 	return nil
@@ -164,13 +196,14 @@ func (m *message) validate() error {
 
 // CallTask calls the underlying task with given args and kwargs
 func (m *message) callTask(ctx context.Context, receipt string) error {
-	return m.Task.call(ctx, m, receipt)
+	return m.task.call(ctx, m, receipt)
 }
 
-// NewMessage creates a new Taskhawk message
+// newMessage creates a new Taskhawk message
 // If metadata is nil, it will be automatically created
 // If the data fails validation, error will be returned.
-func newMessage(input interface{}, headers map[string]string, id string, priority Priority, task *taskDef) (
+func newMessage(input interface{}, headers map[string]string, id string,
+	priority Priority, task *taskDef, taskRegistry *TaskRegistry) (
 	*message, error) {
 
 	// TODO: should probably use a sync.Pool here
@@ -182,11 +215,12 @@ func newMessage(input interface{}, headers map[string]string, id string, priorit
 	}
 
 	message := message{
-		Headers:  headers,
-		ID:       id,
-		Input:    input,
-		Metadata: metadata,
-		Task:     task,
+		Headers:      headers,
+		ID:           id,
+		Input:        input,
+		Metadata:     metadata,
+		task:         task,
+		taskRegistry: taskRegistry,
 	}
 	if err := message.validate(); err != nil {
 		return nil, err
@@ -253,11 +287,13 @@ type QueueRequest struct {
 	QueueMessage *sqs.Message
 	QueueName    string
 	QueueURL     string
+	TaskRegistry *TaskRegistry
 }
 
 // LambdaRequest represents a request for lambda apps
 type LambdaRequest struct {
-	Ctx      context.Context
-	Priority Priority
-	Record   *events.SNSEventRecord
+	Ctx          context.Context
+	Priority     Priority
+	Record       *events.SNSEventRecord
+	TaskRegistry *TaskRegistry
 }

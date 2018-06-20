@@ -76,8 +76,9 @@ const sqsWaitTimeoutSeconds int64 = 20
 var ErrRetry = errors.New("Retry exception")
 
 type lambdaConsumer struct {
-	awsClient iamazonWebServices
-	settings  *Settings
+	awsClient    iamazonWebServices
+	settings     *Settings
+	taskRegistry *TaskRegistry
 }
 
 func (c *lambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
@@ -85,12 +86,13 @@ func (c *lambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events
 	if !getIsLambdaApp(ctx) {
 		return errors.New("Can't process lambda event in a SQS consumer")
 	}
-	return c.awsClient.HandleLambdaEvent(ctx, snsEvent)
+	return c.awsClient.HandleLambdaEvent(ctx, c.taskRegistry, snsEvent)
 }
 
 type queueConsumer struct {
-	awsClient iamazonWebServices
-	settings  *Settings
+	awsClient    iamazonWebServices
+	settings     *Settings
+	taskRegistry *TaskRegistry
 }
 
 func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRequest) error {
@@ -116,7 +118,7 @@ func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRe
 				}
 			}
 			if err := c.awsClient.FetchAndProcessMessages(
-				ctx, request.Priority,
+				ctx, c.taskRegistry, request.Priority,
 				request.NumMessages, request.VisibilityTimeoutS,
 			); err != nil {
 				return err
@@ -127,31 +129,12 @@ func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRe
 	return nil
 }
 
-// NewQueueConsumer creates a new taskhawk consumer for queue apps
-//
-// Cancelable context may be used to cancel processing of messages
-func NewQueueConsumer(sessionCache *AWSSessionsCache, settings *Settings) IQueueConsumer {
-	return &queueConsumer{
-		awsClient: newAmazonWebServices(withSettings(context.Background(), settings), sessionCache),
-		settings:  settings,
-	}
-}
-
-// NewLambdaConsumer creates a new taskhawk consumer for lambda apps
-//
-// Cancelable context may be used to cancel processing of messages
-func NewLambdaConsumer(sessionCache *AWSSessionsCache, settings *Settings) ILambdaConsumer {
-	return &lambdaConsumer{
-		awsClient: newAmazonWebServices(withSettings(context.Background(), settings), sessionCache),
-		settings:  settings,
-	}
-}
-
 // LambdaHandler implements Lambda.Handler interface
 type LambdaHandler struct {
 	lambdaConsumer ILambdaConsumer
 }
 
+// Invoke is the function that is invoked when a Lambda executes
 func (handler *LambdaHandler) Invoke(ctx context.Context, payload []byte) ([]byte, error) {
 	snsEvent := &events.SNSEvent{}
 	err := json.Unmarshal(payload, snsEvent)

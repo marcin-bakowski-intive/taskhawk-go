@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	"github.com/pkg/errors"
-	"github.com/satori/go.uuid"
+	uuid "github.com/satori/go.uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -100,15 +100,15 @@ func (fa *FakeAWS) SendMessageSQS(ctx context.Context, priority Priority, payloa
 	return args.Error(0)
 }
 
-func (fa *FakeAWS) FetchAndProcessMessages(ctx context.Context, priority Priority, numMessages uint,
-	visibilityTimeoutS uint) error {
+func (fa *FakeAWS) FetchAndProcessMessages(ctx context.Context, taskRegistry *TaskRegistry,
+	priority Priority, numMessages uint, visibilityTimeoutS uint) error {
 
-	args := fa.Called(ctx, priority, numMessages, visibilityTimeoutS)
+	args := fa.Called(ctx, taskRegistry, priority, numMessages, visibilityTimeoutS)
 	return args.Error(0)
 }
 
-func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
-	args := fa.Called(ctx, snsEvent)
+func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, taskRegistry *TaskRegistry, snsEvent *events.SNSEvent) error {
+	args := fa.Called(ctx, taskRegistry, snsEvent)
 	return args.Error(0)
 }
 
@@ -162,7 +162,11 @@ func TestAmazonWebServices_PublishSNS(t *testing.T) {
 
 	settings := getLambdaTestSettings()
 
-	message := getValidMessage(nil)
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
+	task := NewSendEmailTask()
+	require.NoError(t, taskRegistry.RegisterTask(task))
+	message := getValidMessage(t, taskRegistry, nil)
 
 	msgJSON, err := json.Marshal(message)
 	require.NoError(t, err)
@@ -208,7 +212,11 @@ func TestAmazonWebServices_SendMessageSQS(t *testing.T) {
 
 	settings := getQueueTestSettings()
 
-	message := getValidMessage(nil)
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
+	task := NewSendEmailTask()
+	require.NoError(t, taskRegistry.RegisterTask(task))
+	message := getValidMessage(t, taskRegistry, nil)
 
 	msgJSON, err := json.Marshal(message)
 	require.NoError(t, err)
@@ -238,30 +246,70 @@ func TestAmazonWebServices_SendMessageSQS(t *testing.T) {
 	fakeSqs.AssertExpectations(t)
 }
 
-func TestAmazonWebServices_messageHandlerFailsOnValidationFailure(t *testing.T) {
+func TestAmazonWebServices_messageHandlerTaskNotRegistered(t *testing.T) {
+	input := &SendEmailTaskInput{
+		To:      "mail@example.com",
+		From:    "mail@spammer.com",
+		Subject: "Hi there!",
+	}
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
+
+	epochMS := 1521493587123
+	ts := JSONTime(time.Unix(int64(epochMS/1000), int64((epochMS%1000)*1000000)))
+	message := &message{
+		Headers: map[string]string{"request_id": "request-id"},
+		ID:      "message-id",
+		Input:   input,
+		Metadata: &metadata{
+			Priority:  PriorityDefault,
+			Timestamp: ts,
+			Version:   CurrentVersion,
+		},
+		taskRegistry: taskRegistry,
+	}
+
 	awsClient := amazonWebServices{}
 	receipt := uuid.Must(uuid.NewV4()).String()
-	message := getValidMessage(nil)
 	message.ID = ""
 	messageJSON, err := json.Marshal(message)
 	require.NoError(t, err)
-	err = awsClient.messageHandler(context.Background(), string(messageJSON), receipt)
+	err = awsClient.messageHandler(context.Background(), taskRegistry, string(messageJSON), receipt)
+	assert.EqualError(t, err, "unable to unmarshal message: invalid task, not registered: ")
+}
+
+func TestAmazonWebServices_messageHandlerFailsOnValidationFailure(t *testing.T) {
+	awsClient := amazonWebServices{}
+	receipt := uuid.Must(uuid.NewV4()).String()
+
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
+	task := NewSendEmailTask()
+	require.NoError(t, taskRegistry.RegisterTask(task))
+	message := getValidMessage(t, taskRegistry, nil)
+	message.ID = ""
+	messageJSON, err := json.Marshal(message)
+	require.NoError(t, err)
+	err = awsClient.messageHandler(context.Background(), taskRegistry, string(messageJSON), receipt)
 	assert.EqualError(t, err, "missing required data")
 }
 
 func TestAmazonWebServices_messageHandlerFailsOnTaskFailure(t *testing.T) {
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
+
 	ctx := context.Background()
 
 	task.On("Run", ctx, &SendEmailTaskInput{}).Return(errors.New("oops"))
 
+	message := getValidMessage(t, taskRegistry, nil)
 	awsClient := amazonWebServices{}
 	receipt := uuid.Must(uuid.NewV4()).String()
-	messageJSON, err := json.Marshal(getValidMessage(nil))
+	messageJSON, err := json.Marshal(message)
 	require.NoError(t, err)
-	err = awsClient.messageHandler(ctx, string(messageJSON), receipt)
+	err = awsClient.messageHandler(ctx, taskRegistry, string(messageJSON), receipt)
 	assert.EqualError(t, err, "oops")
 
 	task.AssertExpectations(t)
@@ -271,7 +319,9 @@ func TestAmazonWebServices_messageHandlerFailsOnBadJSON(t *testing.T) {
 	awsClient := amazonWebServices{}
 	receipt := uuid.Must(uuid.NewV4()).String()
 	messageJSON := "bad json-"
-	err := awsClient.messageHandler(context.Background(), string(messageJSON), receipt)
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
+	err = awsClient.messageHandler(context.Background(), taskRegistry, string(messageJSON), receipt)
 	assert.NotNil(t, err)
 }
 
@@ -279,9 +329,10 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 	settings := getQueueTestSettings()
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
@@ -304,7 +355,7 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 		expected := *input
 		task.On("Run", ctx, &expected).Return(nil)
 
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 
@@ -334,8 +385,8 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 			PriorityHigh: &queueURL,
 		},
 	}
-	err := awsClient.FetchAndProcessMessages(
-		ctx, PriorityHigh, 10, 10,
+	err = awsClient.FetchAndProcessMessages(
+		ctx, taskRegistry, PriorityHigh, 10, 10,
 	)
 	assert.NoError(t, err)
 	task.AssertExpectations(t)
@@ -349,9 +400,10 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 	settings := getQueueTestSettings()
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
@@ -372,7 +424,7 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 	expected := *input
 	task.On("Run", ctx, &expected).Return(errors.New("my bad"))
 
-	message := getValidMessage(input)
+	message := getValidMessage(t, taskRegistry, input)
 	msgJSON, err := json.Marshal(message)
 	require.NoError(t, err)
 
@@ -395,7 +447,7 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 		},
 	}
 	err = awsClient.FetchAndProcessMessages(
-		ctx, PriorityHigh, 10, 10,
+		ctx, taskRegistry, PriorityHigh, 10, 10,
 	)
 	// no error is returned here, but we log the error
 	assert.NoError(t, err)
@@ -434,9 +486,10 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 	}
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
@@ -459,7 +512,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 		expected := *input
 		task.On("Run", ctx, &expected).Return(nil)
 
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 
@@ -480,6 +533,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 			QueueURL:     queueURL,
 			QueueName:    queueName,
 			QueueMessage: outMessages[i],
+			TaskRegistry: taskRegistry,
 		}
 		preProcessHook.On("PreProcessHookQueueApp", queueRequest).Return(nil)
 	}
@@ -497,8 +551,8 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 			PriorityHigh: &queueURL,
 		},
 	}
-	err := awsClient.FetchAndProcessMessages(
-		ctx, PriorityHigh, 10, 10,
+	err = awsClient.FetchAndProcessMessages(
+		ctx, taskRegistry, PriorityHigh, 10, 10,
 	)
 	assert.NoError(t, err)
 	task.AssertExpectations(t)
@@ -520,9 +574,10 @@ func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
 	}
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	fakeSqs := &FakeSQS{}
 	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
@@ -542,7 +597,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
 			Subject: "Hi there!",
 		}
 
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 
@@ -563,6 +618,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
 			QueueURL:     queueUrl,
 			QueueName:    queueName,
 			QueueMessage: outMessages[i],
+			TaskRegistry: taskRegistry,
 		}
 		preProcessHook.On("PreProcessHookQueueApp", queueRequest).Return(errors.New("oops"))
 	}
@@ -580,8 +636,8 @@ func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
 			PriorityHigh: &queueUrl,
 		},
 	}
-	err := awsClient.FetchAndProcessMessages(
-		ctx, PriorityHigh, 10, 10,
+	err = awsClient.FetchAndProcessMessages(
+		ctx, taskRegistry, PriorityHigh, 10, 10,
 	)
 	// the error is NOT bubbled up
 	assert.NoError(t, err)
@@ -607,9 +663,10 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 	}
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	snsRecords := make([]events.SNSEventRecord, 2)
 
@@ -623,7 +680,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 		expected := *input
 		task.On("Run", mock.Anything, &expected).Return(nil)
 
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 
@@ -635,7 +692,8 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 		}
 
 		lambdaRequest := &LambdaRequest{
-			Record: &snsRecords[i],
+			Record:       &snsRecords[i],
+			TaskRegistry: taskRegistry,
 		}
 
 		requestMatcher := func(request2 *LambdaRequest) bool {
@@ -650,7 +708,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 		Records: snsRecords,
 	}
 
-	err := awsClient.HandleLambdaEvent(ctx, snsEvent)
+	err = awsClient.HandleLambdaEvent(ctx, taskRegistry, snsEvent)
 	assert.NoError(t, err)
 
 	task.AssertExpectations(t)
@@ -675,9 +733,10 @@ func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
 	}
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	snsRecords := make([]events.SNSEventRecord, 2)
 
@@ -688,7 +747,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
 			Subject: "Hi there!",
 		}
 
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 
@@ -700,7 +759,8 @@ func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
 		}
 
 		lambdaRequest := &LambdaRequest{
-			Record: &snsRecords[i],
+			Record:       &snsRecords[i],
+			TaskRegistry: taskRegistry,
 		}
 
 		requestMatcher := func(request2 *LambdaRequest) bool {
@@ -715,7 +775,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
 		Records: snsRecords,
 	}
 
-	err := awsClient.HandleLambdaEvent(ctx, snsEvent)
+	err = awsClient.HandleLambdaEvent(ctx, taskRegistry, snsEvent)
 	assert.EqualError(t, errors.Cause(err), "oops")
 
 	task.AssertExpectations(t)
@@ -737,9 +797,10 @@ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
 	InitSettings(settings)
 	ctx := withSettings(context.Background(), settings)
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	snsRecords := make([]events.SNSEventRecord, 2)
 
@@ -753,7 +814,7 @@ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
 		expected := *input
 		task.On("Run", mock.Anything, &expected).Return(nil)
 
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 
@@ -768,7 +829,7 @@ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
 		Records: snsRecords,
 	}
 
-	err := awsClient.HandleLambdaEvent(ctx, snsEvent)
+	err = awsClient.HandleLambdaEvent(ctx, taskRegistry, snsEvent)
 	assert.NoError(t, err)
 
 	task.AssertExpectations(t)
@@ -781,11 +842,12 @@ func TestAmazonWebServices_HandleLambdaEventForwardTaskError(t *testing.T) {
 
 	awsClient := &amazonWebServices{}
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
-	settings := task.Publisher.Settings()
+	settings := taskRegistry.publisher.Settings()
 	ctx := withSettings(context.Background(), settings)
 
 	input := &SendEmailTaskInput{
@@ -797,7 +859,7 @@ func TestAmazonWebServices_HandleLambdaEventForwardTaskError(t *testing.T) {
 	expected := *input
 	task.On("Run", mock.Anything, &expected).Return(errors.New("oops"))
 
-	message := getValidMessage(input)
+	message := getValidMessage(t, taskRegistry, input)
 	msgJSON, err := json.Marshal(message)
 	require.NoError(t, err)
 
@@ -812,7 +874,7 @@ func TestAmazonWebServices_HandleLambdaEventForwardTaskError(t *testing.T) {
 		},
 	}
 
-	err = awsClient.HandleLambdaEvent(ctx, snsEvent)
+	err = awsClient.HandleLambdaEvent(ctx, taskRegistry, snsEvent)
 	assert.EqualError(t, err, "oops")
 
 	task.AssertExpectations(t)
@@ -829,9 +891,10 @@ func TestAmazonWebServices_HandleLambdaEventContextCancel(t *testing.T) {
 
 	awsClient := &amazonWebServices{}
 
+	taskRegistry, err := NewTaskRegistry(fakePublisher)
+	require.NoError(t, err)
 	task := NewSendEmailTask()
-	require.NoError(t, RegisterTask(task))
-	defer CleanupTaskRegistry()
+	require.NoError(t, taskRegistry.RegisterTask(task))
 
 	input := &SendEmailTaskInput{
 		To:      "mail%d@example.com",
@@ -844,7 +907,7 @@ func TestAmazonWebServices_HandleLambdaEventContextCancel(t *testing.T) {
 
 	records := make([]events.SNSEventRecord, 1000)
 	for i := range records {
-		message := getValidMessage(input)
+		message := getValidMessage(t, taskRegistry, input)
 		msgJSON, err := json.Marshal(message)
 		require.NoError(t, err)
 		records[i] = events.SNSEventRecord{
@@ -860,7 +923,7 @@ func TestAmazonWebServices_HandleLambdaEventContextCancel(t *testing.T) {
 
 	ch := make(chan bool)
 	go func() {
-		err := awsClient.HandleLambdaEvent(ctxWithSettings, snsEvent)
+		err := awsClient.HandleLambdaEvent(ctxWithSettings, taskRegistry, snsEvent)
 		assert.EqualError(t, err, "context canceled")
 		ch <- true
 		close(ch)

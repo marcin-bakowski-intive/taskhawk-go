@@ -22,7 +22,7 @@ go get github.com/Automatic/taskhawk-go
 
 Convert your function into a "Task" as shown here:
 
-```go 
+```go
 type SendEmailTaskInput struct {...}
 
 type SendEmailTask struct {
@@ -31,7 +31,6 @@ type SendEmailTask struct {
 
 func (t *SendEmailTask) Run(rawInput interface{}) {
     input := rawInput.(*SendEmailTaskInput)
-    
     // send email
 }
 ```
@@ -40,7 +39,7 @@ Tasks may accept input of arbitrary type as long as it's serializable to JSON
 
 Then, define a few required settings:
 
-```go 
+```go
 sessionCache := NewAWSSessionsCache()
 
 settings := taskhawk.Settings{
@@ -54,27 +53,25 @@ settings := taskhawk.Settings{
 taskhawk.InitSettings(settings)
 ```
 
-Before the task can be dispatched, it would need to be registered like so:
+Before the task can be dispatched, it would need to be registered, as shown below.
+It is recommended that the task names are centrally managed by the application.
 
-```go 
-func NewSendEmailTask() *SendEmailTask {
-    return &SendEmailTask{
-        Task: taskhawk.Task{
-            Inputer: func() interface{} {
-                return &SendEmailTaskInput{}
-            },
-            Publisher: NewPublisher(sessionCache, settings),
-        }
-    }
-}
-
-taskhawk.RegisterTask(NewSendEmailTask())
+```go
+taskRegistry, _ := NewTaskRegistry(NewPublisher(sessionCache, settings))
+taskRegistry.RegisterTask(&SendEmailTask{
+    Task: taskhawk.Task{
+        Inputer: func() interface{} {
+            return &SendEmailTaskInput{}
+        },
+        TaskName: "SendEmailTask",
+    },
+})
 ```
 
 And finally, dispatch your task asynchronously:
 
-```go 
-NewSendEmailTask().dispatch(&SendEmailTaskInput{...})
+```go
+taskRegistry.dispatch("SendEmailTask", &SendEmailTaskInput{...})
 ```
 
 ## Development

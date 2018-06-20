@@ -10,10 +10,8 @@ package taskhawk
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 
 	"github.com/pkg/errors"
-	"github.com/satori/go.uuid"
 )
 
 // ITask is an interface all TaskHawk tasks are expected to implement
@@ -40,9 +38,6 @@ type inputer func() interface{}
 // Task is a base struct that should be embedded in all TaskHawk tasks.
 // It provides partial implementation of the ITask interface by implementing a few methods
 type Task struct {
-	// Publisher is used to publish messages to taskhawk infra for async executation
-	Publisher IPublisher
-
 	// TaskName represents the name of the task
 	TaskName string
 
@@ -70,57 +65,6 @@ func (t *Task) NewInput() interface{} {
 // Priority returns the default priority of a task
 func (t *Task) Priority() Priority {
 	return t.DefaultPriority
-}
-
-// DispatchWithPriority dispatches a task asynchronously with custom priority.
-// The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
-func (t *Task) DispatchWithPriority(ctx context.Context, priority Priority, input interface{}) error {
-	ctx = withSettings(ctx, t.Publisher.Settings())
-
-	taskDef, ok := taskRegistry[t.Name()]
-	if !ok {
-		return errors.New("task has not been registered: make sure `taskhawk." +
-			"RegisterTask` is called before dispatching")
-	}
-
-	headers := make(map[string]string)
-	for key, value := range getDefaultHeaders(ctx)(ctx, taskDef) {
-		headers[key] = value
-	}
-	if inputTaskHeaders, ok := input.(ITaskHeaders); ok {
-		for key, value := range inputTaskHeaders.GetHeaders() {
-			headers[key] = value
-		}
-	}
-
-	message, err := newMessage(
-		input,
-		headers,
-		uuid.Must(uuid.NewV4()).String(),
-		priority,
-		taskRegistry[t.Name()],
-	)
-	if err != nil {
-		return err
-	}
-
-	if getSync(ctx) {
-		return taskDef.Run(ctx, input)
-	}
-
-	return t.Publisher.Publish(ctx, message)
-}
-
-// DispatchWithContext dispatches a task asynchronously with context.
-// The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
-func (t *Task) DispatchWithContext(ctx context.Context, input interface{}) error {
-	return t.DispatchWithPriority(ctx, t.Priority(), input)
-}
-
-// Dispatch a task asynchronously. The concrete type of input is expected to be same as the concrete type of
-// NewInput()'s return value.
-func (t *Task) Dispatch(input interface{}) error {
-	return t.DispatchWithContext(context.Background(), input)
 }
 
 // ITaskHeaders interface needs to be implemented by the input struct if your task needs to get custom headers set
@@ -207,6 +151,7 @@ func (m *TaskMetadata) SetVersion(version Version) {
 // whereas tasks are expected to implement ITask interface themselves
 type taskDef struct {
 	ITask
+	taskRegistry *TaskRegistry
 }
 
 func (t taskDef) MarshalJSON() ([]byte, error) {
@@ -214,13 +159,16 @@ func (t taskDef) MarshalJSON() ([]byte, error) {
 }
 
 func (t *taskDef) UnmarshalJSON(b []byte) error {
+	if t.taskRegistry == nil {
+		return errors.New("No task registry found for taskDef")
+	}
 	var taskName string
 	if err := json.Unmarshal(b, &taskName); err != nil {
 		return err
 	}
-	task, found := taskRegistry[taskName]
-	if !found {
-		return errors.Errorf("invalid task not found")
+	task, err := t.taskRegistry.getTask(taskName)
+	if err != nil {
+		return errors.Errorf("invalid task, not registered: %s", taskName)
 	}
 	*t = *task
 	return nil
@@ -240,21 +188,9 @@ func (t *taskDef) call(ctx context.Context, message *message, receipt string) er
 	return t.Run(ctx, message.Input)
 }
 
-var taskRegistry = make(map[string]*taskDef)
-
-// RegisterTask registers a Taskhawk task. A task needs to be registered before it can be dispatched or run.
-func RegisterTask(task ITask) error {
-	if task.Name() == "" {
-		return errors.New("task name not set")
+func newTaskDef(task ITask, taskRegistry *TaskRegistry) *taskDef {
+	return &taskDef{
+		ITask:        task,
+		taskRegistry: taskRegistry,
 	}
-	if _, found := taskRegistry[task.Name()]; found {
-		return errors.Errorf("task with name '%s' already registered", task.Name())
-	}
-	inputType := reflect.TypeOf(task.NewInput())
-	if inputType != nil && inputType.Kind() != reflect.Ptr {
-		// since metadata methods are implemented on Ptr type, let's be strict about this to avoid confusion
-		return errors.Errorf("method NewInput must return a pointer type")
-	}
-	taskRegistry[task.Name()] = &taskDef{task}
-	return nil
 }

@@ -56,18 +56,23 @@ func TestPublish(t *testing.T) {
 	for _, params := range allParams {
 		settings := params["settings"].(*Settings)
 
-		message := getValidMessage(nil)
-		message.Metadata.Priority = PriorityHigh
-
-		msgJSON, err := json.Marshal(message)
-		require.NoError(t, err)
-
 		// Stub out AWS portion
 		fakeClient := &FakeAWS{}
 		publisherObj := publisher{
 			settings:  settings,
 			awsClient: fakeClient,
 		}
+
+		taskRegistry, err := NewTaskRegistry(&publisherObj)
+		require.NoError(t, err)
+		task := NewSendEmailTask()
+		require.NoError(t, taskRegistry.RegisterTask(task))
+
+		message := getValidMessage(t, taskRegistry, nil)
+		message.Metadata.Priority = PriorityHigh
+
+		msgJSON, err := json.Marshal(message)
+		require.NoError(t, err)
 
 		ctx := withSettings(context.Background(), settings)
 

@@ -31,9 +31,9 @@ type iamazonWebServices interface {
 	PublishSNS(ctx context.Context, priority Priority, payload string, headers map[string]string) error
 	SendMessageSQS(ctx context.Context, priority Priority, payload string,
 		headers map[string]string) error
-	FetchAndProcessMessages(ctx context.Context, priority Priority, numMessages uint,
+	FetchAndProcessMessages(ctx context.Context, taskRegistry *TaskRegistry, priority Priority, numMessages uint,
 		visibilityTimeoutS uint) error
-	HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error
+	HandleLambdaEvent(ctx context.Context, taskRegistry *TaskRegistry, snsEvent *events.SNSEvent) error
 }
 
 func getSQSQueue(ctx context.Context, priority Priority) string {
@@ -155,8 +155,10 @@ func (a *amazonWebServices) SendMessageSQS(ctx context.Context, priority Priorit
 	return errors.Wrap(err, "Failed to send message to SQS")
 }
 
-func (a *amazonWebServices) messageHandler(ctx context.Context, messageBody string, receipt string) error {
-	message := message{}
+func (a *amazonWebServices) messageHandler(ctx context.Context, taskRegistry *TaskRegistry, messageBody string, receipt string) error {
+	message := message{
+		taskRegistry: taskRegistry,
+	}
 	err := json.Unmarshal([]byte(messageBody), &message)
 	if err != nil {
 		logrus.WithError(err).Errorf("invalid message, unable to unmarshal")
@@ -172,11 +174,11 @@ func (a *amazonWebServices) messageHandler(ctx context.Context, messageBody stri
 }
 
 func (a *amazonWebServices) messageHandlerSQS(request *QueueRequest) error {
-	return a.messageHandler(request.Ctx, *request.QueueMessage.Body, *request.QueueMessage.ReceiptHandle)
+	return a.messageHandler(request.Ctx, request.TaskRegistry, *request.QueueMessage.Body, *request.QueueMessage.ReceiptHandle)
 }
 
 func (a *amazonWebServices) messageHandlerLambda(request *LambdaRequest) error {
-	return a.messageHandler(request.Ctx, request.Record.SNS.Message, "")
+	return a.messageHandler(request.Ctx, request.TaskRegistry, request.Record.SNS.Message, "")
 }
 
 func (a *amazonWebServices) processRecord(request *LambdaRequest) error {
@@ -193,12 +195,13 @@ func (a *amazonWebServices) processRecord(request *LambdaRequest) error {
 	return err
 }
 
-func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
+func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, taskRegistry *TaskRegistry, snsEvent *events.SNSEvent) error {
 	wg, childCtx := errgroup.WithContext(ctx)
 	for i := range snsEvent.Records {
 		request := &LambdaRequest{
-			Ctx:    childCtx,
-			Record: &snsEvent.Records[i],
+			Ctx:          childCtx,
+			Record:       &snsEvent.Records[i],
+			TaskRegistry: taskRegistry,
 		}
 		select {
 		case <-ctx.Done():
@@ -241,7 +244,7 @@ func (a *amazonWebServices) processMessage(wg *sync.WaitGroup, request *QueueReq
 	}
 }
 
-func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priority Priority,
+func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, taskRegistry *TaskRegistry, priority Priority,
 	numMessages uint, visibilityTimeoutS uint) error {
 
 	queueName := getSQSQueue(ctx, priority)
@@ -270,6 +273,7 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, priorit
 			QueueMessage: queueMessage,
 			QueueURL:     *queueURL,
 			QueueName:    queueName,
+			TaskRegistry: taskRegistry,
 		}
 		select {
 		case <-ctx.Done():
