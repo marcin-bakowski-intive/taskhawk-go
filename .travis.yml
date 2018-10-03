@@ -1,7 +1,19 @@
+sudo: false
+
 language: go
+
 go:
 - 1.10.x
 - master
+
+git:
+  depth: 1
+
+matrix:
+  allow_failures:
+  - go: master
+  fast_finish: true
+
 script: make test
 notifications:
   slack:
