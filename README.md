@@ -29,7 +29,7 @@ type SendEmailTask struct {
     taskhawk.Task
 }
 
-func (t *SendEmailTask) Run(rawInput interface{}) {
+func (t *SendEmailTask) Run(context context.Context, rawInput interface{}) error {
     input := rawInput.(*SendEmailTaskInput)
     // send email
 }

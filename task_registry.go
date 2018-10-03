@@ -15,28 +15,51 @@ import (
 	uuid "github.com/satori/go.uuid"
 )
 
+// ITaskRegistry is an interface for the task registry to manage tasks
+type ITaskRegistry interface {
+	// DispatchWithPriority dispatches a task asynchronously with custom priority.
+	// The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
+	DispatchWithPriority(ctx context.Context, taskName string, priority Priority, input interface{}) error
+
+	// DispatchWithContext dispatches a task asynchronously with context.
+	// The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
+	DispatchWithContext(ctx context.Context, taskName string, input interface{}) error
+
+	// Dispatch a task asynchronously. The concrete type of input is expected to be same as the concrete type of
+	// NewInput()'s return value.
+	Dispatch(taskName string, input interface{}) error
+
+	// GetTask fetches a task from the task registry
+	GetTask(name string) (ITask, error)
+
+	// NewLambdaConsumer creates a new taskhawk consumer for lambda apps
+	//
+	// Cancelable context may be used to cancel processing of messages
+	NewLambdaConsumer(sessionCache *AWSSessionsCache, settings *Settings) ILambdaConsumer
+
+	// NewQueueConsumer creates a new taskhawk consumer for queue apps
+	//
+	// Cancelable context may be used to cancel processing of messages
+	NewQueueConsumer(sessionCache *AWSSessionsCache, settings *Settings) IQueueConsumer
+
+	// RegisterTask registers the task to the task registry
+	RegisterTask(task ITask) error
+}
+
 // TaskRegistry manages and dispatches tasks registered to this registry
 type TaskRegistry struct {
 	// Publisher is used to publish messages to taskhawk infra for async executation
 	publisher IPublisher
 
-	tasks map[string]*taskDef
+	tasks map[string]ITask
 }
 
 // NewTaskRegistry creates a task registry
 func NewTaskRegistry(publisher IPublisher) (*TaskRegistry, error) {
 	return &TaskRegistry{
 		publisher: publisher,
-		tasks:     map[string]*taskDef{},
+		tasks:     map[string]ITask{},
 	}, nil
-}
-
-func (tr *TaskRegistry) getTask(name string) (*taskDef, error) {
-	taskDef, ok := tr.tasks[name]
-	if !ok {
-		return nil, errors.New(ErrStringTaskNotFound)
-	}
-	return taskDef, nil
 }
 
 // DispatchWithPriority dispatches a task asynchronously with custom priority.
@@ -44,14 +67,14 @@ func (tr *TaskRegistry) getTask(name string) (*taskDef, error) {
 func (tr *TaskRegistry) DispatchWithPriority(ctx context.Context, taskName string, priority Priority, input interface{}) error {
 	ctx = withSettings(ctx, tr.publisher.Settings())
 
-	taskDef, err := tr.getTask(taskName)
+	task, err := tr.GetTask(taskName)
 	if err != nil {
 		return errors.New("task has not been registered: make sure " +
 			"`RegisterTask` is called before dispatching")
 	}
 
 	headers := make(map[string]string)
-	for key, value := range getDefaultHeaders(ctx)(ctx, taskDef) {
+	for key, value := range getDefaultHeaders(ctx)(ctx, task) {
 		headers[key] = value
 	}
 	if inputTaskHeaders, ok := input.(ITaskHeaders); ok {
@@ -65,7 +88,7 @@ func (tr *TaskRegistry) DispatchWithPriority(ctx context.Context, taskName strin
 		headers,
 		uuid.Must(uuid.NewV4()).String(),
 		priority,
-		taskDef,
+		newTaskDef(task, tr),
 		tr,
 	)
 	if err != nil {
@@ -73,7 +96,7 @@ func (tr *TaskRegistry) DispatchWithPriority(ctx context.Context, taskName strin
 	}
 
 	if getSync(ctx) {
-		return taskDef.Run(ctx, input)
+		return task.Run(ctx, input)
 	}
 
 	return tr.publisher.Publish(ctx, message)
@@ -82,18 +105,27 @@ func (tr *TaskRegistry) DispatchWithPriority(ctx context.Context, taskName strin
 // DispatchWithContext dispatches a task asynchronously with context.
 // The concrete type of input is expected to be same as the concrete type of NewInput()'s return value.
 func (tr *TaskRegistry) DispatchWithContext(ctx context.Context, taskName string, input interface{}) error {
-	taskDef, err := tr.getTask(taskName)
+	task, err := tr.GetTask(taskName)
 	if err != nil {
 		return errors.New("task has not been registered: make sure " +
 			"`RegisterTask` is called before dispatching")
 	}
-	return tr.DispatchWithPriority(ctx, taskName, taskDef.Priority(), input)
+	return tr.DispatchWithPriority(ctx, taskName, task.Priority(), input)
 }
 
 // Dispatch a task asynchronously. The concrete type of input is expected to be same as the concrete type of
 // NewInput()'s return value.
 func (tr *TaskRegistry) Dispatch(taskName string, input interface{}) error {
 	return tr.DispatchWithContext(context.Background(), taskName, input)
+}
+
+// GetTask fetches a task from the task registry
+func (tr *TaskRegistry) GetTask(name string) (ITask, error) {
+	taskDef, ok := tr.tasks[name]
+	if !ok {
+		return nil, errors.New(ErrStringTaskNotFound)
+	}
+	return taskDef, nil
 }
 
 // NewLambdaConsumer creates a new taskhawk consumer for lambda apps
@@ -131,6 +163,6 @@ func (tr *TaskRegistry) RegisterTask(task ITask) error {
 		// since metadata methods are implemented on Ptr type, let's be strict about this to avoid confusion
 		return errors.Errorf("method NewInput must return a pointer type")
 	}
-	tr.tasks[task.Name()] = newTaskDef(task, tr)
+	tr.tasks[task.Name()] = task
 	return nil
 }

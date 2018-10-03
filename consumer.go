@@ -78,7 +78,7 @@ var ErrRetry = errors.New("Retry exception")
 type lambdaConsumer struct {
 	awsClient    iamazonWebServices
 	settings     *Settings
-	taskRegistry *TaskRegistry
+	taskRegistry ITaskRegistry
 }
 
 func (c *lambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
@@ -92,7 +92,7 @@ func (c *lambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events
 type queueConsumer struct {
 	awsClient    iamazonWebServices
 	settings     *Settings
-	taskRegistry *TaskRegistry
+	taskRegistry ITaskRegistry
 }
 
 func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRequest) error {

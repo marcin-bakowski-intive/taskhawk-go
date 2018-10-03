@@ -151,7 +151,7 @@ func (m *TaskMetadata) SetVersion(version Version) {
 // whereas tasks are expected to implement ITask interface themselves
 type taskDef struct {
 	ITask
-	taskRegistry *TaskRegistry
+	taskRegistry ITaskRegistry
 }
 
 func (t taskDef) MarshalJSON() ([]byte, error) {
@@ -166,11 +166,11 @@ func (t *taskDef) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &taskName); err != nil {
 		return err
 	}
-	task, err := t.taskRegistry.getTask(taskName)
+	task, err := t.taskRegistry.GetTask(taskName)
 	if err != nil {
 		return errors.Errorf("invalid task, not registered: %s", taskName)
 	}
-	*t = *task
+	*t = *newTaskDef(task, t.taskRegistry)
 	return nil
 }
 
@@ -188,7 +188,7 @@ func (t *taskDef) call(ctx context.Context, message *message, receipt string) er
 	return t.Run(ctx, message.Input)
 }
 
-func newTaskDef(task ITask, taskRegistry *TaskRegistry) *taskDef {
+func newTaskDef(task ITask, taskRegistry ITaskRegistry) *taskDef {
 	return &taskDef{
 		ITask:        task,
 		taskRegistry: taskRegistry,

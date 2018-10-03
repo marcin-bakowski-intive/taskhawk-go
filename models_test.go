@@ -61,7 +61,7 @@ func TestJSONTime_FromJson_InvalidValue(t *testing.T) {
 func getValidMessageByTaskName(t *testing.T, taskName string, taskRegistry *TaskRegistry, input interface{}) *message {
 	epochMS := 1521493587123
 	ts := JSONTime(time.Unix(int64(epochMS/1000), int64((epochMS%1000)*1000000)))
-	td, err := taskRegistry.getTask(taskName)
+	fetchedTask, err := taskRegistry.GetTask(taskName)
 	require.NoError(t, err)
 	return &message{
 		Headers: map[string]string{"request_id": "request-id"},
@@ -72,7 +72,7 @@ func getValidMessageByTaskName(t *testing.T, taskName string, taskRegistry *Task
 			Timestamp: ts,
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 }
@@ -113,9 +113,9 @@ func TestMessageToJsonMinimal(t *testing.T) {
 
 	message := getValidMessageNoInput(t, taskRegistry, nil)
 	message.Headers = map[string]string{}
-	td, err := taskRegistry.getTask("task_test.SendEmailTaskNoInput")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskNoInput")
 	require.NoError(t, err)
-	message.task = td
+	message.task = newTaskDef(fetchedTask, taskRegistry)
 	expected := `{"headers":{},"id":"message-id","kwargs":null,"metadata":{"priority":"default",` +
 		`"timestamp":1521493587123,"version":"1.0"},"task":"task_test.SendEmailTaskNoInput"}`
 	actual, err := json.Marshal(message)
@@ -184,7 +184,7 @@ func TestMessageFromJson_NilInput(t *testing.T) {
 
 	epochMS := 1521493587123
 	ts := JSONTime(time.Unix(int64(epochMS/1000), int64((epochMS%1000)*1000000)))
-	td, err := taskRegistry.getTask(task.Name())
+	fetchedTask, err := taskRegistry.GetTask(task.Name())
 	require.NoError(t, err)
 	expected := &message{
 		Headers: map[string]string{"request_id": "request-id"},
@@ -195,7 +195,7 @@ func TestMessageFromJson_NilInput(t *testing.T) {
 			Timestamp: ts,
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 

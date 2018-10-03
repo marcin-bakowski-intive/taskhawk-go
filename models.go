@@ -69,7 +69,7 @@ type message struct {
 	Input        interface{} `json:"kwargs"`
 	Metadata     *metadata   `json:"metadata"`
 	task         *taskDef
-	taskRegistry *TaskRegistry
+	taskRegistry ITaskRegistry
 }
 
 // Version represents the message format version
@@ -186,7 +186,7 @@ func (m *message) validate() error {
 		return err
 	}
 
-	_, err := m.taskRegistry.getTask(m.task.Name())
+	_, err := m.taskRegistry.GetTask(m.task.Name())
 	if err != nil {
 		return errors.Errorf("invalid task, not registered: %s", m.task.Name())
 	}
@@ -203,7 +203,7 @@ func (m *message) callTask(ctx context.Context, receipt string) error {
 // If metadata is nil, it will be automatically created
 // If the data fails validation, error will be returned.
 func newMessage(input interface{}, headers map[string]string, id string,
-	priority Priority, task *taskDef, taskRegistry *TaskRegistry) (
+	priority Priority, task *taskDef, taskRegistry ITaskRegistry) (
 	*message, error) {
 
 	// TODO: should probably use a sync.Pool here
@@ -287,7 +287,7 @@ type QueueRequest struct {
 	QueueMessage *sqs.Message
 	QueueName    string
 	QueueURL     string
-	TaskRegistry *TaskRegistry
+	TaskRegistry ITaskRegistry
 }
 
 // LambdaRequest represents a request for lambda apps
@@ -295,5 +295,5 @@ type LambdaRequest struct {
 	Ctx          context.Context
 	Priority     Priority
 	Record       *events.SNSEventRecord
-	TaskRegistry *TaskRegistry
+	TaskRegistry ITaskRegistry
 }

@@ -34,7 +34,7 @@ func TestDispatchWithPriority(t *testing.T) {
 		Subject: "Hi there!",
 	}
 
-	td, err := taskRegistry.getTask("task_test.SendEmailTask")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTask")
 	require.NoError(t, err)
 	expectedMessage := &message{
 		Headers: map[string]string{},
@@ -45,12 +45,12 @@ func TestDispatchWithPriority(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	fakePublisher.On("Publish", ctxWithSettings, mock.Anything).Return(nil)
 
-	assert.NoError(t, taskRegistry.DispatchWithPriority(context.Background(), td.Name(), PriorityLow, input))
+	assert.NoError(t, taskRegistry.DispatchWithPriority(context.Background(), task.Name(), PriorityLow, input))
 
 	actual := fakePublisher.Calls[0].Arguments.Get(1).(*message)
 	// don't check dynamic things
@@ -86,7 +86,7 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 	ctxWithRequestID := context.WithValue(context.Background(), "request_id", publisherRequestID)
 	ctxWithSettings := withSettings(ctxWithRequestID, taskRegistry.publisher.Settings())
 
-	td, err := taskRegistry.getTask("task_test.SendEmailTask")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTask")
 	require.NoError(t, err)
 	expectedMessage := &message{
 		Headers: map[string]string{"request_id": publisherRequestID},
@@ -97,12 +97,12 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	fakePublisher.On("Publish", ctxWithSettings, mock.Anything).Return(nil)
 
-	assert.NoError(t, taskRegistry.DispatchWithPriority(ctxWithRequestID, td.Name(), PriorityLow, input))
+	assert.NoError(t, taskRegistry.DispatchWithPriority(ctxWithRequestID, task.Name(), PriorityLow, input))
 
 	actual := fakePublisher.Calls[0].Arguments.Get(1).(*message)
 	// don't check dynamic things
@@ -127,7 +127,7 @@ func TestDispatchHeaders(t *testing.T) {
 		"request_id": uuid.Must(uuid.NewV4()).String(),
 	}
 
-	td, err := taskRegistry.getTask(task.Name())
+	fetchedTask, err := taskRegistry.GetTask(task.Name())
 	require.NoError(t, err)
 	expectedMessage := &message{
 		Headers: input.Headers,
@@ -138,7 +138,7 @@ func TestDispatchHeaders(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	fakePublisher.On("Publish", ctxWithSettings, mock.Anything).Return(nil)
@@ -205,7 +205,7 @@ func TestDispatchNoInput(t *testing.T) {
 
 	ctxWithSettings := withSettings(context.Background(), taskRegistry.publisher.Settings())
 
-	td, err := taskRegistry.getTask("task_test.SendEmailTaskNoInput")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskNoInput")
 	require.NoError(t, err)
 	expectedMessage := &message{
 		Headers: map[string]string{},
@@ -216,7 +216,7 @@ func TestDispatchNoInput(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	fakePublisher.On("Publish", ctxWithSettings, mock.Anything).Return(nil)

@@ -62,7 +62,7 @@ func TestCall(t *testing.T) {
 	task.On("Run", ctx, input).Return(nil)
 
 	receipt := uuid.Must(uuid.NewV4()).String()
-	td, err := taskRegistry.getTask("task_test.SendEmailTask")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTask")
 	require.NoError(t, err)
 	message := message{
 		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
@@ -77,7 +77,7 @@ func TestCall(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	require.NoError(t, message.validate())
@@ -113,7 +113,7 @@ func TestCallNoInput(t *testing.T) {
 	task.On("Run", ctx, nil).Return(nil)
 
 	receipt := uuid.Must(uuid.NewV4()).String()
-	td, err := taskRegistry.getTask("task_test.SendEmailTaskNoInput")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskNoInput")
 	require.NoError(t, err)
 	message := message{
 		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
@@ -124,7 +124,7 @@ func TestCallNoInput(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	require.NoError(t, message.validate())
@@ -166,7 +166,7 @@ func TestCallHeaders(t *testing.T) {
 	ctx := context.Background()
 
 	receipt := uuid.Must(uuid.NewV4()).String()
-	td, err := taskRegistry.getTask("task_test.SendEmailTaskHeaders")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskHeaders")
 	require.NoError(t, err)
 	message := message{
 		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
@@ -177,7 +177,7 @@ func TestCallHeaders(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 	expectedInput := &SendEmailTaskHeadersInput{}
@@ -221,7 +221,7 @@ func TestCallMetadata(t *testing.T) {
 	ctx := context.Background()
 
 	receipt := uuid.Must(uuid.NewV4()).String()
-	td, err := taskRegistry.getTask("task_test.SendEmailTaskMetadata")
+	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskMetadata")
 	require.NoError(t, err)
 	message := message{
 		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
@@ -232,7 +232,7 @@ func TestCallMetadata(t *testing.T) {
 			Timestamp: JSONTime(time.Now()),
 			Version:   CurrentVersion,
 		},
-		task:         td,
+		task:         newTaskDef(fetchedTask, taskRegistry),
 		taskRegistry: taskRegistry,
 	}
 

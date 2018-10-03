@@ -100,14 +100,14 @@ func (fa *FakeAWS) SendMessageSQS(ctx context.Context, priority Priority, payloa
 	return args.Error(0)
 }
 
-func (fa *FakeAWS) FetchAndProcessMessages(ctx context.Context, taskRegistry *TaskRegistry,
+func (fa *FakeAWS) FetchAndProcessMessages(ctx context.Context, taskRegistry ITaskRegistry,
 	priority Priority, numMessages uint, visibilityTimeoutS uint) error {
 
 	args := fa.Called(ctx, taskRegistry, priority, numMessages, visibilityTimeoutS)
 	return args.Error(0)
 }
 
-func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, taskRegistry *TaskRegistry, snsEvent *events.SNSEvent) error {
+func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, taskRegistry ITaskRegistry, snsEvent *events.SNSEvent) error {
 	args := fa.Called(ctx, taskRegistry, snsEvent)
 	return args.Error(0)
 }

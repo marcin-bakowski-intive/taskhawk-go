@@ -31,9 +31,9 @@ type iamazonWebServices interface {
 	PublishSNS(ctx context.Context, priority Priority, payload string, headers map[string]string) error
 	SendMessageSQS(ctx context.Context, priority Priority, payload string,
 		headers map[string]string) error
-	FetchAndProcessMessages(ctx context.Context, taskRegistry *TaskRegistry, priority Priority, numMessages uint,
+	FetchAndProcessMessages(ctx context.Context, taskRegistry ITaskRegistry, priority Priority, numMessages uint,
 		visibilityTimeoutS uint) error
-	HandleLambdaEvent(ctx context.Context, taskRegistry *TaskRegistry, snsEvent *events.SNSEvent) error
+	HandleLambdaEvent(ctx context.Context, taskRegistry ITaskRegistry, snsEvent *events.SNSEvent) error
 }
 
 func getSQSQueue(ctx context.Context, priority Priority) string {
@@ -155,7 +155,7 @@ func (a *amazonWebServices) SendMessageSQS(ctx context.Context, priority Priorit
 	return errors.Wrap(err, "Failed to send message to SQS")
 }
 
-func (a *amazonWebServices) messageHandler(ctx context.Context, taskRegistry *TaskRegistry, messageBody string, receipt string) error {
+func (a *amazonWebServices) messageHandler(ctx context.Context, taskRegistry ITaskRegistry, messageBody string, receipt string) error {
 	message := message{
 		taskRegistry: taskRegistry,
 	}
@@ -195,7 +195,7 @@ func (a *amazonWebServices) processRecord(request *LambdaRequest) error {
 	return err
 }
 
-func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, taskRegistry *TaskRegistry, snsEvent *events.SNSEvent) error {
+func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, taskRegistry ITaskRegistry, snsEvent *events.SNSEvent) error {
 	wg, childCtx := errgroup.WithContext(ctx)
 	for i := range snsEvent.Records {
 		request := &LambdaRequest{
@@ -244,7 +244,7 @@ func (a *amazonWebServices) processMessage(wg *sync.WaitGroup, request *QueueReq
 	}
 }
 
-func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, taskRegistry *TaskRegistry, priority Priority,
+func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, taskRegistry ITaskRegistry, priority Priority,
 	numMessages uint, visibilityTimeoutS uint) error {
 
 	queueName := getSQSQueue(ctx, priority)
