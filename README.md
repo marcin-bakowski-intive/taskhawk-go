@@ -76,6 +76,10 @@ taskRegistry.dispatch("SendEmailTask", &SendEmailTaskInput{...})
 
 ## Development
 
+### Prerequisites
+
+Install go1.11.x
+
 ### Getting Started
 
 Assuming that you have golang installed, set up your environment like so:
@@ -83,7 +87,7 @@ Assuming that you have golang installed, set up your environment like so:
 ```bash
 
 $ cd ${GOPATH}/src/github.com/Automatic/taskhawk-go
-$ govendor sync
+$ go build
 ```
 
 ### Running tests

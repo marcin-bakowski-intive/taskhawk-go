@@ -158,7 +158,6 @@ func withDefaults(s *Settings) {
 	if s.AWSReadTimeout == 0 {
 		s.AWSReadTimeout = 2 * time.Second
 	}
-	return
 }
 
 func verifyRequired(input *Settings) {

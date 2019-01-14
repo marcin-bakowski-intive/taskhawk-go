@@ -12,7 +12,7 @@ import (
 	"reflect"
 
 	"github.com/pkg/errors"
-	uuid "github.com/satori/go.uuid"
+	"github.com/satori/go.uuid"
 )
 
 // ITaskRegistry is an interface for the task registry to manage tasks
@@ -86,7 +86,7 @@ func (tr *TaskRegistry) DispatchWithPriority(ctx context.Context, taskName strin
 	message, err := newMessage(
 		input,
 		headers,
-		uuid.Must(uuid.NewV4()).String(),
+		uuid.NewV4().String(),
 		priority,
 		newTaskDef(task, tr),
 		tr,

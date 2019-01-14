@@ -23,7 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	"github.com/pkg/errors"
-	uuid "github.com/satori/go.uuid"
+	"github.com/satori/go.uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -270,7 +270,7 @@ func TestAmazonWebServices_messageHandlerTaskNotRegistered(t *testing.T) {
 	}
 
 	awsClient := amazonWebServices{}
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	message.ID = ""
 	messageJSON, err := json.Marshal(message)
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestAmazonWebServices_messageHandlerTaskNotRegistered(t *testing.T) {
 
 func TestAmazonWebServices_messageHandlerFailsOnValidationFailure(t *testing.T) {
 	awsClient := amazonWebServices{}
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 
 	taskRegistry, err := NewTaskRegistry(fakePublisher)
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func TestAmazonWebServices_messageHandlerFailsOnTaskFailure(t *testing.T) {
 
 	message := getValidMessage(t, taskRegistry, nil)
 	awsClient := amazonWebServices{}
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	messageJSON, err := json.Marshal(message)
 	require.NoError(t, err)
 	err = awsClient.messageHandler(ctx, taskRegistry, string(messageJSON), receipt)
@@ -317,7 +317,7 @@ func TestAmazonWebServices_messageHandlerFailsOnTaskFailure(t *testing.T) {
 
 func TestAmazonWebServices_messageHandlerFailsOnBadJSON(t *testing.T) {
 	awsClient := amazonWebServices{}
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	messageJSON := "bad json-"
 	taskRegistry, err := NewTaskRegistry(fakePublisher)
 	require.NoError(t, err)
@@ -361,7 +361,7 @@ func TestAmazonWebServices_FetchAndProcessMessages(t *testing.T) {
 
 		outMessages[i] = &sqs.Message{
 			Body:          aws.String(string(msgJSON)),
-			ReceiptHandle: aws.String(uuid.Must(uuid.NewV4()).String()),
+			ReceiptHandle: aws.String(uuid.NewV4().String()),
 		}
 
 		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
@@ -432,7 +432,7 @@ func TestAmazonWebServices_FetchAndProcessMessagesNoDeleteOnError(t *testing.T) 
 		Messages: []*sqs.Message{
 			{
 				Body:          aws.String(string(msgJSON)),
-				ReceiptHandle: aws.String(uuid.Must(uuid.NewV4()).String()),
+				ReceiptHandle: aws.String(uuid.NewV4().String()),
 			},
 		},
 	}
@@ -518,7 +518,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp(t *testing.T) {
 
 		outMessages[i] = &sqs.Message{
 			Body:          aws.String(string(msgJSON)),
-			ReceiptHandle: aws.String(uuid.Must(uuid.NewV4()).String()),
+			ReceiptHandle: aws.String(uuid.NewV4().String()),
 		}
 
 		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
@@ -603,7 +603,7 @@ func TestAmazonWebServices_PreprocessHookQueueApp_Error(t *testing.T) {
 
 		outMessages[i] = &sqs.Message{
 			Body:          aws.String(string(msgJSON)),
-			ReceiptHandle: aws.String(uuid.Must(uuid.NewV4()).String()),
+			ReceiptHandle: aws.String(uuid.NewV4().String()),
 		}
 
 		expectedDeleteMessageInput := &sqs.DeleteMessageInput{
@@ -686,7 +686,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp(t *testing.T) {
 
 		snsRecords[i] = events.SNSEventRecord{
 			SNS: events.SNSEntity{
-				MessageID: uuid.Must(uuid.NewV4()).String(),
+				MessageID: uuid.NewV4().String(),
 				Message:   string(msgJSON),
 			},
 		}
@@ -753,7 +753,7 @@ func TestAmazonWebServices_PreprocessHookLambdaApp_Error(t *testing.T) {
 
 		snsRecords[i] = events.SNSEventRecord{
 			SNS: events.SNSEntity{
-				MessageID: uuid.Must(uuid.NewV4()).String(),
+				MessageID: uuid.NewV4().String(),
 				Message:   string(msgJSON),
 			},
 		}
@@ -820,7 +820,7 @@ func TestAmazonWebServices_HandleLambdaEvent(t *testing.T) {
 
 		snsRecords[i] = events.SNSEventRecord{
 			SNS: events.SNSEntity{
-				MessageID: uuid.Must(uuid.NewV4()).String(),
+				MessageID: uuid.NewV4().String(),
 				Message:   string(msgJSON),
 			},
 		}
@@ -867,7 +867,7 @@ func TestAmazonWebServices_HandleLambdaEventForwardTaskError(t *testing.T) {
 		Records: []events.SNSEventRecord{
 			{
 				SNS: events.SNSEntity{
-					MessageID: uuid.Must(uuid.NewV4()).String(),
+					MessageID: uuid.NewV4().String(),
 					Message:   string(msgJSON),
 				},
 			},
@@ -912,7 +912,7 @@ func TestAmazonWebServices_HandleLambdaEventContextCancel(t *testing.T) {
 		require.NoError(t, err)
 		records[i] = events.SNSEventRecord{
 			SNS: events.SNSEntity{
-				MessageID: uuid.Must(uuid.NewV4()).String(),
+				MessageID: uuid.NewV4().String(),
 				Message:   string(msgJSON),
 			},
 		}

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	uuid "github.com/satori/go.uuid"
+	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -355,7 +355,7 @@ func TestMessage_CallTask(t *testing.T) {
 
 	message := getValidMessage(t, taskRegistry, input)
 	message.validate()
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 
 	assert.NoError(t, message.callTask(ctx, receipt))
 

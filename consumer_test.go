@@ -15,7 +15,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/pkg/errors"
-	uuid "github.com/satori/go.uuid"
+	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -165,7 +165,7 @@ func TestConsumer_HandleLambdaEvent(t *testing.T) {
 		Records: []events.SNSEventRecord{
 			{
 				SNS: events.SNSEntity{
-					MessageID: uuid.Must(uuid.NewV4()).String(),
+					MessageID: uuid.NewV4().String(),
 					Message:   "message",
 				},
 			},
@@ -213,7 +213,7 @@ type fakeLambdaConsumer struct {
 	ILambdaConsumer
 }
 
-func (lambdaConsumer fakeLambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
+func (lambdaConsumer *fakeLambdaConsumer) HandleLambdaEvent(ctx context.Context, snsEvent *events.SNSEvent) error {
 	args := lambdaConsumer.Called(ctx, snsEvent)
 	return args.Error(0)
 }

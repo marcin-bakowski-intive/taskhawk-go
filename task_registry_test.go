@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	uuid "github.com/satori/go.uuid"
+	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -81,7 +81,7 @@ func TestDispatchDefaultHeadersHook(t *testing.T) {
 		},
 	}
 
-	publisherRequestID := uuid.Must(uuid.NewV4()).String()
+	publisherRequestID := uuid.NewV4().String()
 
 	ctxWithRequestID := context.WithValue(context.Background(), "request_id", publisherRequestID)
 	ctxWithSettings := withSettings(ctxWithRequestID, taskRegistry.publisher.Settings())
@@ -124,7 +124,7 @@ func TestDispatchHeaders(t *testing.T) {
 
 	input := &SendEmailTaskHeadersInput{}
 	input.Headers = map[string]string{
-		"request_id": uuid.Must(uuid.NewV4()).String(),
+		"request_id": uuid.NewV4().String(),
 	}
 
 	fetchedTask, err := taskRegistry.GetTask(task.Name())

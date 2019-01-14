@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	uuid "github.com/satori/go.uuid"
+	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -61,11 +61,11 @@ func TestCall(t *testing.T) {
 	}
 	task.On("Run", ctx, input).Return(nil)
 
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTask")
 	require.NoError(t, err)
 	message := message{
-		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
+		Headers: map[string]string{"request_id": uuid.NewV4().String()},
 		ID:      "message-id",
 		Input: &SendEmailTaskInput{
 			To:      "mail@example.com",
@@ -112,11 +112,11 @@ func TestCallNoInput(t *testing.T) {
 
 	task.On("Run", ctx, nil).Return(nil)
 
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskNoInput")
 	require.NoError(t, err)
 	message := message{
-		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
+		Headers: map[string]string{"request_id": uuid.NewV4().String()},
 		ID:      "message-id",
 		Input:   nil,
 		Metadata: &metadata{
@@ -165,11 +165,11 @@ func TestCallHeaders(t *testing.T) {
 	require.NoError(t, taskRegistry.RegisterTask(task))
 	ctx := context.Background()
 
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskHeaders")
 	require.NoError(t, err)
 	message := message{
-		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
+		Headers: map[string]string{"request_id": uuid.NewV4().String()},
 		ID:      "message-id",
 		Input:   task.NewInput(),
 		Metadata: &metadata{
@@ -220,11 +220,11 @@ func TestCallMetadata(t *testing.T) {
 	require.NoError(t, taskRegistry.RegisterTask(task))
 	ctx := context.Background()
 
-	receipt := uuid.Must(uuid.NewV4()).String()
+	receipt := uuid.NewV4().String()
 	fetchedTask, err := taskRegistry.GetTask("task_test.SendEmailTaskMetadata")
 	require.NoError(t, err)
 	message := message{
-		Headers: map[string]string{"request_id": uuid.Must(uuid.NewV4()).String()},
+		Headers: map[string]string{"request_id": uuid.NewV4().String()},
 		ID:      "message-id",
 		Input:   &SendEmailTaskMetadataInput{},
 		Metadata: &metadata{

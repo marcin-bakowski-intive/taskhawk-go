@@ -32,7 +32,7 @@ type ListenRequest struct {
 
 	// LoopCount is the number of loops to run for fetching messages.
 	// This may be used to limit to only certain number of messages.
-	// Defaults to running as an infinite loop until the context is cancelled.
+	// Defaults to running as an infinite loop until the context is canceled.
 	LoopCount uint
 }
 
@@ -113,7 +113,7 @@ func (c *queueConsumer) ListenForMessages(ctx context.Context, request *ListenRe
 		default:
 			if deadline, ok := ctx.Deadline(); ok {
 				// is shutting down?
-				if deadline.Sub(time.Now()) < getShutdownTimeout(ctx) {
+				if time.Until(deadline) < getShutdownTimeout(ctx) {
 					return nil
 				}
 			}

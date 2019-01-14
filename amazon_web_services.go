@@ -197,6 +197,7 @@ func (a *amazonWebServices) processRecord(request *LambdaRequest) error {
 
 func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, taskRegistry ITaskRegistry, snsEvent *events.SNSEvent) error {
 	wg, childCtx := errgroup.WithContext(ctx)
+loop:
 	for i := range snsEvent.Records {
 		request := &LambdaRequest{
 			Ctx:          childCtx,
@@ -205,7 +206,7 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, taskRegistry 
 		}
 		select {
 		case <-ctx.Done():
-			break
+			break loop
 		default:
 			wg.Go(func() error {
 				return a.processRecord(request)
@@ -214,7 +215,7 @@ func (a *amazonWebServices) HandleLambdaEvent(ctx context.Context, taskRegistry 
 	}
 	err := wg.Wait()
 	if ctx.Err() != nil {
-		// if context was cancelled, signal appropriately
+		// if context was canceled, signal appropriately
 		return ctx.Err()
 	}
 	return err
@@ -267,6 +268,7 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, taskReg
 		return errors.Wrap(err, "failed to receive SQS message")
 	}
 	wg := sync.WaitGroup{}
+loop:
 	for _, queueMessage := range out.Messages {
 		request := &QueueRequest{
 			Ctx:          ctx,
@@ -277,14 +279,14 @@ func (a *amazonWebServices) FetchAndProcessMessages(ctx context.Context, taskReg
 		}
 		select {
 		case <-ctx.Done():
-			break
+			break loop
 		default:
 			wg.Add(1)
 			go a.processMessage(&wg, request)
 		}
 	}
 	wg.Wait()
-	// if context was cancelled, signal appropriately
+	// if context was canceled, signal appropriately
 	return ctx.Err()
 }
 
