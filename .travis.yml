@@ -20,7 +20,7 @@ matrix:
 install:
 - go get -mod=readonly -v ./...
 - go get -u github.com/client9/misspell/cmd/misspell
-- go get -u honnef.co/go/tools/cmd/staticcheck
+- go get -u honnef.co/go/tools/cmd/staticcheck@2019.1.1
 
 before_script:
 - go vet -tags test
