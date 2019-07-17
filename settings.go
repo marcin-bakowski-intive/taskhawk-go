@@ -32,6 +32,9 @@ type Settings struct {
 	// AWS read timeout for publisher
 	AWSReadTimeout time.Duration
 
+	// AWS debug request error logs toggle
+	AWSDebugRequestLogEnabled bool
+
 	// AWSSessionToken represents temporary credentials (for example, for Lambda apps)
 	AWSSessionToken string // optional;
 
@@ -108,6 +111,10 @@ func getAWSSessionToken(ctx context.Context) string {
 
 func getAWSReadTimeout(ctx context.Context) time.Duration {
 	return ctx.Value(settingsKey).(*Settings).AWSReadTimeout
+}
+
+func getAWSDebugRequestLogEnabled(ctx context.Context) bool {
+	return ctx.Value(settingsKey).(*Settings).AWSDebugRequestLogEnabled
 }
 
 func getDefaultHeaders(ctx context.Context) DefaultHeaders {

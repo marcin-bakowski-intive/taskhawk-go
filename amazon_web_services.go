@@ -72,6 +72,13 @@ func getSNSTopic(ctx context.Context, priority Priority) string {
 	return topic
 }
 
+func getRequestLogLevel(awsDebugRequestLogEnabled bool) aws.LogLevelType {
+	if awsDebugRequestLogEnabled {
+		return aws.LogDebugWithRequestErrors
+	}
+	return aws.LogOff
+}
+
 // amazonWebServices wrapper struct for taskhawk
 type amazonWebServices struct {
 	sns       snsiface.SNSAPI
@@ -101,6 +108,7 @@ func (a *amazonWebServices) PublishSNS(ctx context.Context, priority Priority, p
 			MessageAttributes: attributes,
 		},
 		request.WithResponseReadTimeout(getAWSReadTimeout(ctx)),
+		request.WithLogLevel(getRequestLogLevel(getAWSDebugRequestLogEnabled(ctx))),
 	)
 	return errors.Wrap(err, "Failed to publish message to SNS")
 }
@@ -116,7 +124,8 @@ func (a *amazonWebServices) ensureQueueURL(ctx context.Context, priority Priorit
 			ctx,
 			&sqs.GetQueueUrlInput{
 				QueueName: &queueName,
-			})
+			},
+			request.WithLogLevel(getRequestLogLevel(getAWSDebugRequestLogEnabled(ctx))))
 		if err != nil {
 			return nil, errors.Wrap(err, "unable to get queue url")
 		}
@@ -150,6 +159,7 @@ func (a *amazonWebServices) SendMessageSQS(ctx context.Context, priority Priorit
 			MessageBody:       &payload,
 			MessageAttributes: attributes,
 		},
+		request.WithLogLevel(getRequestLogLevel(getAWSDebugRequestLogEnabled(ctx))),
 	)
 
 	return errors.Wrap(err, "Failed to send message to SQS")
