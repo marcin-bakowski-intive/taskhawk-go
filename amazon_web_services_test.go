@@ -57,6 +57,11 @@ func (fs *FakeSQS) GetQueueUrlWithContext(ctx aws.Context, in *sqs.GetQueueUrlIn
 	return args.Get(0).(*sqs.GetQueueUrlOutput), args.Error(1)
 }
 
+func (fs *FakeSQS) GetQueueAttributesWithContext(ctx aws.Context, in *sqs.GetQueueAttributesInput, opts ...request.Option) (*sqs.GetQueueAttributesOutput, error) {
+	args := fs.Called(ctx, in, opts)
+	return args.Get(0).(*sqs.GetQueueAttributesOutput), args.Error(1)
+}
+
 func (fs *FakeSQS) ReceiveMessageWithContext(ctx aws.Context, in *sqs.ReceiveMessageInput,
 	options ...request.Option) (*sqs.ReceiveMessageOutput, error) {
 	args := fs.Called(ctx, in)
@@ -109,6 +114,11 @@ func (fa *FakeAWS) FetchAndProcessMessages(ctx context.Context, taskRegistry ITa
 
 func (fa *FakeAWS) HandleLambdaEvent(ctx context.Context, taskRegistry ITaskRegistry, snsEvent *events.SNSEvent) error {
 	args := fa.Called(ctx, taskRegistry, snsEvent)
+	return args.Error(0)
+}
+
+func (fa *FakeAWS) RequeueDLQMessages(ctx context.Context, priority Priority, numMessages uint32, visibilityTimeoutS uint32) error {
+	args := fa.Called(ctx, priority, numMessages, visibilityTimeoutS)
 	return args.Error(0)
 }
 
@@ -944,4 +954,222 @@ func TestNewAmazonWebServices(t *testing.T) {
 
 	iaws := newAmazonWebServices(ctx, sessionCache)
 	assert.NotNil(t, iaws)
+}
+
+func TestAWSClient_getSQSQueueDlqURL(t *testing.T) {
+	settings := getQueueTestSettings()
+	ctx := withSettings(context.Background(), settings)
+	fakeSqs := &FakeSQS{}
+	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
+	queueDLQName := fmt.Sprintf("%s-DLQ", queueName)
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	expectedQueueDLQURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueDLQName
+	attributeName := "RedrivePolicy"
+
+	awsClient := &amazonWebServices{
+		sqs: fakeSqs,
+		// pre-filled cache
+		queueUrls: map[Priority]*string{
+			PriorityHigh: &queueURL,
+		},
+	}
+
+	expectedInputQueueAttributes := sqs.GetQueueAttributesInput{
+		QueueUrl:       &queueURL,
+		AttributeNames: []*string{&attributeName},
+	}
+	arn := fmt.Sprintf("arn:aws:sqs:us-east-1:686176732873:%s", queueDLQName)
+	redrivePolicy := fmt.Sprintf("{\"DeadLetterTargetArn\": \"%s\", \"MaxReceiveCount\": 4}", arn)
+	outputQueueAttributes := sqs.GetQueueAttributesOutput{
+		Attributes: map[string]*string{"RedrivePolicy": &redrivePolicy},
+	}
+	expectedInputQueueUrl := sqs.GetQueueUrlInput{
+		QueueName: &queueDLQName,
+	}
+	outputQueueUrl := sqs.GetQueueUrlOutput{
+		QueueUrl: &expectedQueueDLQURL,
+	}
+
+	fakeSqs.On("GetQueueAttributesWithContext", ctx, &expectedInputQueueAttributes, mock.Anything).Return(&outputQueueAttributes, nil)
+	fakeSqs.On("GetQueueUrlWithContext", ctx, &expectedInputQueueUrl, mock.Anything).Return(&outputQueueUrl, nil)
+
+	queueDLQURL, err := awsClient.getSQSQueueDlqURL(ctx, queueURL)
+	assert.NoError(t, err)
+	assert.Equal(t, expectedQueueDLQURL, *queueDLQURL)
+	fakeSqs.AssertExpectations(t)
+}
+
+func TestAWSClient_getSQSQueueDlqURL_errorNoPolicy(t *testing.T) {
+	settings := getQueueTestSettings()
+	ctx := withSettings(context.Background(), settings)
+	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	attributeName := "RedrivePolicy"
+
+	fakeSqs := &FakeSQS{}
+	awsClient := &amazonWebServices{
+		sqs: fakeSqs,
+		// pre-filled cache
+		queueUrls: map[Priority]*string{
+			PriorityHigh: &queueURL,
+		},
+	}
+
+	expectedInputQueueAttributes := sqs.GetQueueAttributesInput{
+		QueueUrl:       &queueURL,
+		AttributeNames: []*string{&attributeName},
+	}
+	outputQueueAttributes := sqs.GetQueueAttributesOutput{
+		Attributes: map[string]*string{},
+	}
+
+	fakeSqs.On("GetQueueAttributesWithContext", ctx, &expectedInputQueueAttributes, mock.Anything).Return(&outputQueueAttributes, nil)
+
+	_, err := awsClient.getSQSQueueDlqURL(ctx, queueURL)
+	assert.NotNil(t, err)
+	assert.EqualError(t, fmt.Errorf("%s", err), "RedrivePolicy attribute is null or empty string")
+	fakeSqs.AssertExpectations(t)
+}
+
+func TestAWSClient_getSQSQueueDlqURL_invalidJsonPolicy(t *testing.T) {
+	settings := getQueueTestSettings()
+	ctx := withSettings(context.Background(), settings)
+	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	attributeName := "RedrivePolicy"
+
+	fakeSqs := &FakeSQS{}
+	awsClient := &amazonWebServices{
+		sqs: fakeSqs,
+		// pre-filled cache
+		queueUrls: map[Priority]*string{
+			PriorityHigh: &queueURL,
+		},
+	}
+
+	redrivePolicy := "invalid"
+	outputQueueAttributes := sqs.GetQueueAttributesOutput{
+		Attributes: map[string]*string{"RedrivePolicy": &redrivePolicy},
+	}
+	expectedInputQueueAttributes := sqs.GetQueueAttributesInput{
+		QueueUrl:       &queueURL,
+		AttributeNames: []*string{&attributeName},
+	}
+
+	fakeSqs.On("GetQueueAttributesWithContext", ctx, &expectedInputQueueAttributes, mock.Anything).Return(&outputQueueAttributes, nil)
+
+	_, err := awsClient.getSQSQueueDlqURL(ctx, queueURL)
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "invalid RedrivePolicy, unable to unmarshal")
+	fakeSqs.AssertExpectations(t)
+}
+
+func TestAWSClient_enqueueSQSMessage(t *testing.T) {
+	settings := getQueueTestSettings()
+	ctx := withSettings(context.Background(), settings)
+	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
+	queueDLQName := fmt.Sprintf("%s-DLQ", queueName)
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueDLQURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueDLQName
+	messageId := "123"
+
+	fakeSqs := &FakeSQS{}
+	awsClient := &amazonWebServices{
+		sqs: fakeSqs,
+		// pre-filled cache
+		queueUrls: map[Priority]*string{
+			PriorityHigh: &queueURL,
+		},
+	}
+	msgBody := "body"
+	queueMessage := sqs.Message{Body: &msgBody, MessageId: &messageId}
+
+	sendMessageInput := sqs.SendMessageInput{
+		QueueUrl:          &queueURL,
+		MessageBody:       queueMessage.Body,
+		MessageAttributes: queueMessage.MessageAttributes,
+	}
+	sendMessageOutput := sqs.SendMessageOutput{MessageId: &messageId}
+	deleteMessageInput := sqs.DeleteMessageInput{
+		QueueUrl:      &queueDLQURL,
+		ReceiptHandle: queueMessage.ReceiptHandle,
+	}
+	deleteMessageOutput := sqs.DeleteMessageOutput{}
+
+	fakeSqs.On("SendMessageWithContext", ctx, &sendMessageInput, mock.Anything).Return(&sendMessageOutput, nil)
+	fakeSqs.On("DeleteMessageWithContext", ctx, &deleteMessageInput, mock.Anything).Return(&deleteMessageOutput, nil)
+
+	err := awsClient.enqueueSQSMessage(ctx, &queueMessage, &queueDLQURL, &queueURL)
+	assert.NoError(t, err)
+	fakeSqs.AssertExpectations(t)
+}
+
+func TestAWSClient_RequeueDLQMessages(t *testing.T) {
+	settings := getQueueTestSettings()
+	ctx := withSettings(context.Background(), settings)
+	queueName := "TASKHAWK-DEV-MYAPP-HIGH-PRIORITY"
+	queueDLQName := fmt.Sprintf("%s-DLQ", queueName)
+	queueURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueName
+	queueDLQURL := "https://sqs.us-east-1.amazonaws.com/686176732873/" + queueDLQName
+	attributeName := "RedrivePolicy"
+	messageId := "123"
+
+	fakeSqs := &FakeSQS{}
+	awsClient := &amazonWebServices{
+		sqs: fakeSqs,
+		// pre-filled cache
+		queueUrls: map[Priority]*string{
+			PriorityHigh: &queueURL,
+		},
+	}
+
+	expectedInputQueueAttributes := sqs.GetQueueAttributesInput{
+		QueueUrl:       &queueURL,
+		AttributeNames: []*string{&attributeName},
+	}
+	arn := fmt.Sprintf("arn:aws:sqs:us-east-1:686176732873:%s", queueDLQName)
+	redrivePolicy := fmt.Sprintf("{\"DeadLetterTargetArn\": \"%s\", \"MaxReceiveCount\": 4}", arn)
+	outputQueueAttributes := sqs.GetQueueAttributesOutput{
+		Attributes: map[string]*string{"RedrivePolicy": &redrivePolicy},
+	}
+	expectedInputQueueDlqUrl := sqs.GetQueueUrlInput{
+		QueueName: &queueDLQName,
+	}
+	outputQueueDlqUrl := sqs.GetQueueUrlOutput{
+		QueueUrl: &queueDLQURL,
+	}
+	expectedReceiveMessageInput := sqs.ReceiveMessageInput{
+		QueueUrl:            &queueDLQURL,
+		MaxNumberOfMessages: aws.Int64(10),
+		VisibilityTimeout:   aws.Int64(10),
+		WaitTimeSeconds:     aws.Int64(sqsRequeueWaitTimeoutSeconds),
+	}
+	msgBody := "body"
+	queueMessage := sqs.Message{Body: &msgBody, MessageId: &messageId}
+	expectedReceiveMessageOutput := sqs.ReceiveMessageOutput{
+		Messages: []*sqs.Message{&queueMessage},
+	}
+
+	sendMessageInput := sqs.SendMessageInput{
+		QueueUrl:          &queueURL,
+		MessageBody:       queueMessage.Body,
+		MessageAttributes: queueMessage.MessageAttributes,
+	}
+	sendMessageOutput := sqs.SendMessageOutput{MessageId: &messageId}
+	deleteMessageInput := sqs.DeleteMessageInput{
+		QueueUrl:      &queueDLQURL,
+		ReceiptHandle: queueMessage.ReceiptHandle,
+	}
+	deleteMessageOutput := sqs.DeleteMessageOutput{}
+
+	fakeSqs.On("GetQueueAttributesWithContext", ctx, &expectedInputQueueAttributes, mock.Anything).Return(&outputQueueAttributes, nil)
+	fakeSqs.On("GetQueueUrlWithContext", ctx, &expectedInputQueueDlqUrl, mock.Anything).Return(&outputQueueDlqUrl, nil)
+	fakeSqs.On("SendMessageWithContext", ctx, &sendMessageInput, mock.Anything).Return(&sendMessageOutput, nil)
+	fakeSqs.On("DeleteMessageWithContext", ctx, &deleteMessageInput, mock.Anything).Return(&deleteMessageOutput, nil)
+	fakeSqs.On("ReceiveMessageWithContext", ctx, &expectedReceiveMessageInput, mock.Anything).Times(1).Return(&expectedReceiveMessageOutput, nil)
+	fakeSqs.On("ReceiveMessageWithContext", ctx, &expectedReceiveMessageInput, mock.Anything).Times(1).Return(&sqs.ReceiveMessageOutput{}, nil)
+
+	err := awsClient.RequeueDLQMessages(ctx, PriorityHigh, 10, 10)
+	assert.NoError(t, err)
+	fakeSqs.AssertExpectations(t)
 }

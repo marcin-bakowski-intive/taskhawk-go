@@ -34,6 +34,7 @@ type iamazonWebServices interface {
 	FetchAndProcessMessages(ctx context.Context, taskRegistry ITaskRegistry, priority Priority, numMessages uint,
 		visibilityTimeoutS uint) error
 	HandleLambdaEvent(ctx context.Context, taskRegistry ITaskRegistry, snsEvent *events.SNSEvent) error
+	RequeueDLQMessages(ctx context.Context, priority Priority, numMessages uint32, visibilityTimeoutS uint32) error
 }
 
 func getSQSQueue(ctx context.Context, priority Priority) string {
@@ -298,6 +299,114 @@ loop:
 	wg.Wait()
 	// if context was canceled, signal appropriately
 	return ctx.Err()
+}
+
+// redrivePolicy model for AWS SQS RedrivePolicy attribute.
+type redrivePolicy struct {
+	DeadLetterTargetArn string `json:"DeadLetterTargetArn"`
+}
+
+func (a *amazonWebServices) getSQSQueueDlqURL(ctx context.Context, queueURL string) (*string, error) {
+	logLevel := getRequestLogLevel(getAWSDebugRequestLogEnabled(ctx))
+	attributeName := "RedrivePolicy"
+	queueAttrResp, err := a.sqs.GetQueueAttributesWithContext(ctx, &sqs.GetQueueAttributesInput{
+		QueueUrl:       &queueURL,
+		AttributeNames: []*string{&attributeName},
+	}, request.WithLogLevel(logLevel))
+	if err != nil {
+		return nil, err
+	}
+	policy := queueAttrResp.Attributes[attributeName]
+	if policy == nil || len(*policy) == 0 {
+		return nil, errors.Errorf("%s attribute is null or empty string", attributeName)
+	}
+
+	jsonData := []byte(*policy)
+	dlqRedrivePolicy := redrivePolicy{}
+	err = json.Unmarshal(jsonData, &dlqRedrivePolicy)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid RedrivePolicy, unable to unmarshal")
+	}
+	parts := strings.Split(dlqRedrivePolicy.DeadLetterTargetArn, ":")
+	dlqQueueName := parts[len(parts)-1]
+
+	out, err := a.sqs.GetQueueUrlWithContext(
+		ctx,
+		&sqs.GetQueueUrlInput{QueueName: &dlqQueueName},
+		request.WithLogLevel(logLevel))
+	if err != nil {
+		return nil, errors.Wrap(err, "Unable to get DLQ url")
+	}
+	return out.QueueUrl, nil
+}
+
+func (a *amazonWebServices) enqueueSQSMessage(ctx context.Context, queueMessage *sqs.Message, queueDlqURL *string, queueURL *string) error {
+	loggingFields := logrus.Fields{
+		"message_sqs_id": *queueMessage.MessageId,
+		"queue_url":      queueURL,
+		"queue_dlq_url":  queueDlqURL,
+	}
+	sendMessageInput := sqs.SendMessageInput{
+		QueueUrl:          queueURL,
+		MessageBody:       queueMessage.Body,
+		MessageAttributes: queueMessage.MessageAttributes,
+	}
+	logrus.WithFields(loggingFields).Info("Enqueue message")
+
+	logLevel := getRequestLogLevel(getAWSDebugRequestLogEnabled(ctx))
+	_, err := a.sqs.SendMessageWithContext(ctx, &sendMessageInput, request.WithLogLevel(logLevel))
+	if err != nil {
+		return err
+	}
+	_, err = a.sqs.DeleteMessageWithContext(ctx, &sqs.DeleteMessageInput{
+		QueueUrl:      queueDlqURL,
+		ReceiptHandle: queueMessage.ReceiptHandle,
+	}, request.WithLogLevel(logLevel))
+	if err != nil {
+		logrus.WithError(err).WithFields(loggingFields).Errorf("Failed to delete message from DLQ: %v", err)
+	}
+	return err
+}
+
+func (a *amazonWebServices) RequeueDLQMessages(ctx context.Context, priority Priority, numMessages uint32, visibilityTimeoutS uint32) error {
+	queueURL, err := a.ensureQueueURL(ctx, priority)
+	if err != nil {
+		return errors.Wrap(err, "failed to get SQS Queue URL")
+	}
+	dlqQueueUrl, err := a.getSQSQueueDlqURL(ctx, *queueURL)
+	if err != nil {
+		return errors.Wrap(err, "failed to get SQS DLQ Queue URL")
+	}
+	logrus.WithFields(logrus.Fields{"queue_url": *queueURL, "dlq_queue_url": *dlqQueueUrl}).Info("Found queue URLs")
+
+	input := &sqs.ReceiveMessageInput{
+		MaxNumberOfMessages: aws.Int64(int64(numMessages)),
+		QueueUrl:            dlqQueueUrl,
+		WaitTimeSeconds:     aws.Int64(sqsRequeueWaitTimeoutSeconds),
+	}
+	if visibilityTimeoutS != 0 {
+		input.VisibilityTimeout = aws.Int64(int64(visibilityTimeoutS))
+	}
+	logLevel := getRequestLogLevel(getAWSDebugRequestLogEnabled(ctx))
+
+	for {
+		out, err := a.sqs.ReceiveMessageWithContext(ctx, input, request.WithLogLevel(logLevel))
+		if err != nil {
+			return errors.Wrap(err, "failed to receive SQS messages from DLQ")
+		}
+
+		logrus.Infof("Found %d messages to requeue", len(out.Messages))
+		if len(out.Messages) == 0 {
+			return nil
+		}
+
+		for i := range out.Messages {
+			err = a.enqueueSQSMessage(ctx, out.Messages[i], dlqQueueUrl, queueURL)
+			if err != nil {
+				return errors.Wrap(err, "failed to enqueue SQS message")
+			}
+		}
+	}
 }
 
 func newAmazonWebServices(ctx context.Context, sessionCache *AWSSessionsCache) iamazonWebServices {
